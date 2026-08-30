@@ -6,7 +6,7 @@ export function parseGroupCommand(text: string): GroupCommand | null {
   if (expense) return { text: `gastei ${expense[1]}`, kind: "expense" };
   const income = trimmed.match(/^!{1,2}receita\b[\s:,-]*(.+)$/i);
   if (income) return { text: `recebi ${income[1]}`, kind: "income" };
-  const mention = trimmed.match(/^@(?:boragrana|fluxo)\b[\s:,-]*(.+)$/i);
+  const mention = trimmed.match(/^@(?:contaai|boragrana|fluxo)\b[\s:,-]*(.+)$/i);
   if (mention) return { text: mention[1], kind: "mention" };
   return null;
 }

@@ -74,6 +74,6 @@ export async function POST(request: Request) {
   }
   const { error: transactionError } = await admin.from("transactions").insert({ user_id: connection.user_id, description: parsed.description, amount: parsed.amount, occurred_on: new Date().toISOString().slice(0, 10), status: "review", external_id: message.id, fingerprint: `whatsapp:${message.id}`, raw_data: { category: parsed.category, source: "whatsapp", original_text: message.text.body } });
   if (transactionError) return NextResponse.json({ error: "Falha ao criar transação." }, { status: 500 });
-  await sendText(phoneNumberId, message.from, `Anotei ${parsed.description}: ${formatBRL(parsed.amount)}. Abra o BoraGrana para revisar e confirmar.`);
+  await sendText(phoneNumberId, message.from, `Anotei ${parsed.description}: ${formatBRL(parsed.amount)}. Abra o Conta Aí para revisar e confirmar.`);
   return NextResponse.json({ received: true });
 }
