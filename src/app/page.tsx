@@ -24,13 +24,14 @@ export default function Home() {
   const [review, setReview] = useState<Transaction[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [userId, setUserId] = useState<string>();
   const [userEmail, setUserEmail] = useState("carregando...");
   const fileInput = useRef<HTMLInputElement>(null);
-  const today = new Date();
-  const monthKey = today.toISOString().slice(0, 7);
-  const monthLabel = today.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-  const dateLabel = today.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" }).toUpperCase();
+  const today = mounted ? new Date() : null;
+  const monthKey = today?.toISOString().slice(0, 7) ?? "";
+  const monthLabel = today?.toLocaleDateString("pt-BR", { month: "long", year: "numeric" }) ?? "Mês atual";
+  const dateLabel = today?.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" }).toUpperCase() ?? "CARREGANDO DATA";
   const currentMonth = useMemo(() => transactions.filter((item) => item.occurredOn.startsWith(monthKey)), [transactions, monthKey]);
   const income = currentMonth.reduce((total, item) => total + Math.max(item.amount, 0), 0);
   const expenses = currentMonth.reduce((total, item) => total + Math.abs(Math.min(item.amount, 0)), 0);
@@ -49,6 +50,7 @@ export default function Home() {
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(async ({ data }) => {
+      setMounted(true);
       if (!data.user) {
         router.replace("/login");
         return;
