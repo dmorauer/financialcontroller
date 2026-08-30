@@ -287,7 +287,7 @@ export default function Home() {
         </nav>
         <div className="sideBottom">
           <div className="whatsapp"><span>●</span><div><strong>WhatsApp conectado</strong><small>Grupos: !gasto ou !receita</small></div></div>
-          <a href="#"><Icon>⚙</Icon>Configurações</a>
+          <a href="/settings/whatsapp"><Icon>⚙</Icon>Configurações</a>
           <button className="profile profileButton" onClick={signOut}><div className="avatar">FC</div><div><strong>Minha conta</strong><small>{userEmail}</small></div><span>Sair</span></button>
         </div>
       </aside>
