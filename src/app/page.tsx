@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 
 type Transaction = { id: string; name: string; category: string; date: string; occurredOn: string; amount: number; accountId?: string | null };
 type Account = { id: string; name: string; kind: string; institution: string | null; openingBalance: number };
+type Budget = { id: string; category: string; month: string; amount: number };
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -27,6 +28,11 @@ export default function Home() {
   const [showAccountForm, setShowAccountForm] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [showBudgetForm, setShowBudgetForm] = useState(false);
+  const [assistantText, setAssistantText] = useState("");
+  const [assistantLoading, setAssistantLoading] = useState(false);
+  const [assistantMessage, setAssistantMessage] = useState("");
   const [importing, setImporting] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [userId, setUserId] = useState<string>();
@@ -50,6 +56,8 @@ export default function Home() {
     const start = categories.slice(0, index).reduce((sum, category) => sum + category.percent, 0);
     return `${chartColors[index]} ${start}% ${start + item.percent}%`;
   }).join(",")})` : "#e8edea";
+  const totalBudget = budgets.reduce((total, budget) => total + budget.amount, 0);
+  const budgetSpent = budgets.reduce((total, budget) => total + (categories.find((item) => item.name === budget.category)?.value ?? 0), 0);
 
   useEffect(() => {
     const supabase = createClient();
@@ -61,11 +69,14 @@ export default function Home() {
       }
       setUserId(data.user.id);
       setUserEmail(data.user.email ?? "Minha conta");
-      const [{ data: rows }, { data: accountRows }] = await Promise.all([
+      const currentMonth = `${new Date().toISOString().slice(0, 7)}-01`;
+      const [{ data: rows }, { data: accountRows }, { data: budgetRows }] = await Promise.all([
         supabase.from("transactions").select("id, description, amount, occurred_on, raw_data, status, account_id").neq("status", "ignored").order("occurred_on", { ascending: false }).limit(100),
         supabase.from("accounts").select("id, name, kind, institution, opening_balance").order("created_at"),
+        supabase.from("budgets").select("id, category, month, amount").eq("month", currentMonth).order("category"),
       ]);
       setAccounts((accountRows ?? []).map((account) => ({ id: account.id, name: account.name, kind: account.kind, institution: account.institution, openingBalance: Number(account.opening_balance) })));
+      setBudgets((budgetRows ?? []).map((budget) => ({ id: budget.id, category: budget.category, month: budget.month, amount: Number(budget.amount) })));
       const mapped = (rows ?? []).map((row) => ({
         id: row.id,
         name: row.description,
@@ -116,6 +127,41 @@ export default function Home() {
     if (error) return window.alert(`Não foi possível criar a conta: ${error.message}`);
     setAccounts((current) => [...current, { id: saved.id, name: candidate.name, kind: candidate.kind, institution: candidate.institution, openingBalance: candidate.opening_balance }]);
     setShowAccountForm(false);
+  }
+
+  async function saveBudget(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!userId || !monthKey) return;
+    const data = new FormData(event.currentTarget);
+    const category = String(data.get("category"));
+    const amount = parseAmount(String(data.get("amount")));
+    if (!amount || amount <= 0) return window.alert("Informe um valor maior que zero.");
+    const candidate = { user_id: userId, category, month: `${monthKey}-01`, amount };
+    const { data: saved, error } = await createClient().from("budgets").upsert(candidate, { onConflict: "user_id,category,month" }).select("id, category, month, amount").single();
+    if (error) return window.alert(`Não foi possível salvar o orçamento: ${error.message}`);
+    const updated = { id: saved.id, category: saved.category, month: saved.month, amount: Number(saved.amount) };
+    setBudgets((current) => [...current.filter((item) => item.category !== updated.category), updated].sort((a, b) => a.category.localeCompare(b.category)));
+    setShowBudgetForm(false);
+  }
+
+  async function addWithAssistant(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const text = assistantText.trim();
+    if (!text || assistantLoading) return;
+    setAssistantLoading(true);
+    setAssistantMessage("");
+    try {
+      const response = await fetch("/api/assistant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Não foi possível interpretar o lançamento.");
+      setTransactions((current) => [result.transaction as Transaction, ...current]);
+      setAssistantText("");
+      setAssistantMessage(`Lançado: ${result.transaction.name} por ${money.format(Math.abs(result.transaction.amount))}.`);
+    } catch (error) {
+      setAssistantMessage(error instanceof Error ? error.message : "Não foi possível lançar agora.");
+    } finally {
+      setAssistantLoading(false);
+    }
   }
 
   async function deleteTransaction() {
@@ -199,11 +245,11 @@ export default function Home() {
           <a href="#transactions"><Icon>⇅</Icon>Transações</a>
           <a href="#imports"><Icon>↑</Icon>Importar</a>
           <a href="#review"><Icon>✓</Icon>Revisão {review.length > 0 && <b>{review.length}</b>}</a>
-          <a href="#"><Icon>◎</Icon>Orçamentos</a>
+          <a href="#budgets"><Icon>◎</Icon>Orçamentos</a>
           <a href="#"><Icon>▤</Icon>Relatórios</a>
         </nav>
         <div className="sideBottom">
-          <div className="whatsapp pending"><span>●</span><div><strong>WhatsApp não configurado</strong><small>Integração pendente</small></div></div>
+          <div className="whatsapp"><span>●</span><div><strong>WhatsApp conectado</strong><small>Evolution API ativa</small></div></div>
           <a href="#"><Icon>⚙</Icon>Configurações</a>
           <button className="profile profileButton" onClick={signOut}><div className="avatar">FC</div><div><strong>Minha conta</strong><small>{userEmail}</small></div><span>Sair</span></button>
         </div>
@@ -235,10 +281,16 @@ export default function Home() {
 
           <article className="card assistantCard">
             <div className="aiHead"><span>✦</span><div><h2>Assistente financeiro</h2><p>Análise inteligente</p></div></div>
-            <div className="insight"><span>💡</span><div><strong>{transactions.length ? "Seus dados estão prontos para análise" : "Adicione transações para receber análises"}</strong><p>{transactions.length ? "Os próximos insights serão gerados apenas a partir dos seus dados reais." : "Nenhuma recomendação foi gerada porque ainda não há histórico confirmado."}</p></div></div>
-            <div className="quickAsk disabled"><span>✦</span><input disabled aria-label="Pergunte ao assistente" placeholder="Assistente em breve"/><button disabled>↑</button></div>
+            <div className="insight"><span>💡</span><div><strong>Conte o que aconteceu</strong><p>Escreva como você fala. Ex.: “gastei 50 no mercado” ou “recebi 2.000 de salário”. O lançamento entra automaticamente.</p></div></div>
+            <form className="quickAsk" onSubmit={addWithAssistant}><span>✦</span><input value={assistantText} onChange={(event) => setAssistantText(event.target.value)} disabled={assistantLoading} aria-label="Novo lançamento por texto" placeholder="Gastei 50 no mercado..."/><button disabled={assistantLoading || !assistantText.trim()} aria-label="Lançar">{assistantLoading ? "…" : "↑"}</button></form>
+            {assistantMessage && <p className="assistantMessage" role="status">{assistantMessage}</p>}
           </article>
         </div>
+
+        <article className="card budgetsCard" id="budgets">
+          <div className="cardTitle"><div><h2>Orçamentos do mês</h2><p className="capitalize">Limites por categoria • {monthLabel}</p></div><button onClick={() => setShowBudgetForm(true)}>+ Definir limite</button></div>
+          {budgets.length === 0 ? <div className="emptyState"><strong>Nenhum orçamento definido</strong><p>Defina quanto pretende gastar em cada categoria e acompanhe o progresso aqui.</p></div> : <><div className="budgetSummary"><div><small>Planejado</small><strong>{money.format(totalBudget)}</strong></div><div><small>Gasto nas categorias</small><strong>{money.format(budgetSpent)}</strong></div><div><small>Disponível</small><strong className={totalBudget - budgetSpent < 0 ? "red" : "green"}>{money.format(totalBudget - budgetSpent)}</strong></div></div><div className="budgetList">{budgets.map((budget) => { const spent = categories.find((item) => item.name === budget.category)?.value ?? 0; const percent = Math.round(spent / budget.amount * 100); return <div className="budgetRow" key={budget.id}><div className="budgetLabels"><div><strong>{budget.category}</strong><small>{money.format(spent)} de {money.format(budget.amount)}</small></div><b className={percent >= 100 ? "red" : percent >= 80 ? "warning" : "green"}>{percent}%</b></div><div className="budgetTrack"><i className={percent >= 100 ? "over" : percent >= 80 ? "near" : ""} style={{ width: `${Math.min(percent, 100)}%` }}/></div></div>; })}</div></>}
+        </article>
 
         <article className="card transactions" id="transactions">
           <div className="cardTitle"><div><h2>Transações recentes</h2><p>Seus últimos lançamentos</p></div><a href="#">Ver todas →</a></div>
@@ -252,6 +304,7 @@ export default function Home() {
 
       {showForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowForm(false)}><form className="transactionForm" onSubmit={addTransaction} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>{editingTransaction ? "Editar transação" : "Nova transação"}</h2><p>Informe os dados reais do lançamento.</p></div><button type="button" onClick={() => setShowForm(false)}>×</button></div><label>Descrição<input name="description" required defaultValue={editingTransaction?.name} placeholder="Ex.: Almoço"/></label><div className="formGrid"><label>Valor<input name="amount" required inputMode="decimal" defaultValue={editingTransaction ? Math.abs(editingTransaction.amount).toFixed(2).replace(".", ",") : ""} placeholder="0,00"/></label><label>Tipo<select name="type" defaultValue={editingTransaction?.amount && editingTransaction.amount > 0 ? "income" : "expense"}><option value="expense">Despesa</option><option value="income">Receita</option></select></label></div><div className="formGrid"><label>Data<input name="date" type="date" required defaultValue={editingTransaction?.occurredOn || new Date().toISOString().slice(0, 10)}/></label><label>Conta<select name="account" defaultValue={editingTransaction?.accountId || ""}><option value="">Sem conta</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label></div><label>Categoria<select name="category" defaultValue={editingTransaction?.category || "Alimentação"}><option>Alimentação</option><option>Moradia</option><option>Transporte</option><option>Lazer</option><option>Saúde</option><option>Receita</option><option>Outros</option></select></label><div className="formActions">{editingTransaction && <button className="dangerButton" type="button" onClick={deleteTransaction}>Excluir</button>}<button className="primary formSubmit" type="submit">Salvar transação</button></div></form></div>}
       {showAccountForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowAccountForm(false)}><form className="transactionForm" onSubmit={addAccount} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>Adicionar conta</h2><p>O saldo inicial entra no seu saldo total.</p></div><button type="button" onClick={() => setShowAccountForm(false)}>×</button></div><label>Nome da conta<input name="name" required placeholder="Ex.: Nubank"/></label><label>Instituição<input name="institution" placeholder="Ex.: Nu Pagamentos"/></label><div className="formGrid"><label>Tipo<select name="kind"><option value="checking">Conta-corrente</option><option value="savings">Poupança</option><option value="cash">Dinheiro</option><option value="credit_card">Cartão de crédito</option><option value="investment">Investimento</option></select></label><label>Saldo inicial<input name="openingBalance" inputMode="decimal" defaultValue="0,00"/></label></div><button className="primary formSubmit" type="submit">Criar conta</button></form></div>}
+      {showBudgetForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowBudgetForm(false)}><form className="transactionForm" onSubmit={saveBudget} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>Definir orçamento</h2><p className="capitalize">Limite para {monthLabel}.</p></div><button type="button" onClick={() => setShowBudgetForm(false)}>×</button></div><label>Categoria<select name="category" defaultValue="Alimentação"><option>Alimentação</option><option>Moradia</option><option>Transporte</option><option>Lazer</option><option>Saúde</option><option>Outros</option></select></label><label>Limite mensal<input name="amount" required inputMode="decimal" placeholder="Ex.: 800,00"/></label><button className="primary formSubmit" type="submit">Salvar orçamento</button></form></div>}
     </main>
   );
 }
