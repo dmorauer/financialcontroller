@@ -1,6 +1,8 @@
 "use client";
 
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 
 type Transaction = { id: string; name: string; category: string; date: string; amount: number };
 
@@ -24,24 +26,51 @@ function Icon({ children }: { children: React.ReactNode }) {
 }
 
 export default function Home() {
+  const router = useRouter();
   const [transactions, setTransactions] = useState(initialTransactions);
   const [review, setReview] = useState<Transaction[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [userId, setUserId] = useState<string>();
+  const [userEmail, setUserEmail] = useState("carregando...");
   const fileInput = useRef<HTMLInputElement>(null);
 
-  function addTransaction(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (!data.user) {
+        router.replace("/login");
+        return;
+      }
+      setUserId(data.user.id);
+      setUserEmail(data.user.email ?? "Minha conta");
+      const { data: rows } = await supabase.from("transactions").select("id, description, amount, occurred_on, raw_data").neq("status", "ignored").order("occurred_on", { ascending: false }).limit(100);
+      setTransactions((rows ?? []).map((row) => ({
+        id: row.id,
+        name: row.description,
+        category: String((row.raw_data as { category?: string } | null)?.category ?? "Outros"),
+        date: new Date(`${row.occurred_on}T12:00:00`).toLocaleDateString("pt-BR"),
+        amount: Number(row.amount),
+      })));
+    });
+  }, [router]);
+
+  async function addTransaction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!userId) return;
     const data = new FormData(event.currentTarget);
     const type = data.get("type");
     const entered = parseAmount(String(data.get("amount")));
     if (!entered) return;
-    setTransactions((current) => [{
-      id: crypto.randomUUID(),
-      name: String(data.get("description")),
-      category: String(data.get("category")),
-      date: "Agora",
+    const candidate = {
+      user_id: userId,
+      description: String(data.get("description")),
       amount: type === "expense" ? -Math.abs(entered) : Math.abs(entered),
-    }, ...current]);
+      occurred_on: new Date().toISOString().slice(0, 10),
+      raw_data: { category: String(data.get("category")) },
+    };
+    const { data: saved, error } = await createClient().from("transactions").insert(candidate).select("id").single();
+    if (error) return window.alert(`Não foi possível salvar: ${error.message}`);
+    setTransactions((current) => [{ id: saved.id, name: candidate.description, category: String(data.get("category")), date: "Agora", amount: candidate.amount }, ...current]);
     setShowForm(false);
   }
 
@@ -61,10 +90,20 @@ export default function Home() {
     setReview(candidates);
   }
 
-  function approve(item: Transaction) {
+  async function approve(item: Transaction) {
+    if (!userId) return;
     const duplicate = transactions.some((transaction) => transaction.name === item.name && transaction.amount === item.amount);
-    if (!duplicate) setTransactions((current) => [item, ...current]);
+    if (!duplicate) {
+      const { data: saved, error } = await createClient().from("transactions").insert({ user_id: userId, description: item.name, amount: item.amount, occurred_on: new Date().toISOString().slice(0, 10), raw_data: { category: item.category, imported: true } }).select("id").single();
+      if (error) return window.alert(`Não foi possível aprovar: ${error.message}`);
+      setTransactions((current) => [{ ...item, id: saved.id }, ...current]);
+    }
     setReview((current) => current.filter((candidate) => candidate.id !== item.id));
+  }
+
+  async function signOut() {
+    await createClient().auth.signOut();
+    router.replace("/login");
   }
 
   return (
@@ -82,7 +121,7 @@ export default function Home() {
         <div className="sideBottom">
           <div className="whatsapp"><span>●</span><div><strong>WhatsApp conectado</strong><small>Pronto para receber</small></div></div>
           <a href="#"><Icon>⚙</Icon>Configurações</a>
-          <div className="profile"><div className="avatar">MR</div><div><strong>Marcos Ribeiro</strong><small>marcos@email.com</small></div><span>⋮</span></div>
+          <button className="profile profileButton" onClick={signOut}><div className="avatar">FC</div><div><strong>Minha conta</strong><small>{userEmail}</small></div><span>Sair</span></button>
         </div>
       </aside>
 
