@@ -276,7 +276,7 @@ export default function Home() {
   return (
     <main className="shell">
       <aside className="sidebar">
-        <div className="brand"><span className="brandMark">f</span><span>fluxo</span></div>
+        <div className="brand"><span className="brandMark">B</span><span>BoraGrana</span></div>
         <nav>
           <a className="active" href="#"><Icon>▦</Icon>Visão geral</a>
           <a href="#transactions"><Icon>⇅</Icon>Transações</a>

@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Fluxo | Seu controlador financeiro",
+  title: "BoraGrana | Seu dinheiro organizado",
   description: "Organize suas finanças por WhatsApp, extratos e notas fiscais.",
 };
 
