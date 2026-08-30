@@ -1,15 +1,72 @@
-const transactions = [
-  { name: "Supermercado Pão de Açúcar", category: "Alimentação", date: "Hoje, 10:42", value: "- R$ 187,40", tone: "red" },
-  { name: "Salário", category: "Receita", date: "29 ago, 08:15", value: "+ R$ 8.750,00", tone: "green" },
-  { name: "Uber", category: "Transporte", date: "28 ago, 19:30", value: "- R$ 32,90", tone: "red" },
-  { name: "Conta de energia", category: "Moradia", date: "27 ago, 13:06", value: "- R$ 214,18", tone: "red" },
+"use client";
+
+import { FormEvent, useRef, useState } from "react";
+
+type Transaction = { id: string; name: string; category: string; date: string; amount: number };
+
+const initialTransactions: Transaction[] = [
+  { id: "1", name: "Supermercado Pão de Açúcar", category: "Alimentação", date: "Hoje, 10:42", amount: -187.4 },
+  { id: "2", name: "Salário", category: "Receita", date: "29 ago, 08:15", amount: 8750 },
+  { id: "3", name: "Uber", category: "Transporte", date: "28 ago, 19:30", amount: -32.9 },
+  { id: "4", name: "Conta de energia", category: "Moradia", date: "27 ago, 13:06", amount: -214.18 },
 ];
+
+const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+
+function parseAmount(raw: string) {
+  const cleaned = raw.replace(/R\$|\s/g, "");
+  const normalized = cleaned.includes(",") ? cleaned.replace(/\./g, "").replace(",", ".") : cleaned;
+  return Number(normalized.replace(/[^0-9.-]/g, ""));
+}
 
 function Icon({ children }: { children: React.ReactNode }) {
   return <span className="icon" aria-hidden="true">{children}</span>;
 }
 
 export default function Home() {
+  const [transactions, setTransactions] = useState(initialTransactions);
+  const [review, setReview] = useState<Transaction[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  function addTransaction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const type = data.get("type");
+    const entered = parseAmount(String(data.get("amount")));
+    if (!entered) return;
+    setTransactions((current) => [{
+      id: crypto.randomUUID(),
+      name: String(data.get("description")),
+      category: String(data.get("category")),
+      date: "Agora",
+      amount: type === "expense" ? -Math.abs(entered) : Math.abs(entered),
+    }, ...current]);
+    setShowForm(false);
+  }
+
+  async function importStatement(file?: File) {
+    if (!file) return;
+    const text = await file.text();
+    const rows = text.split(/\r?\n/).filter(Boolean).slice(0, 100);
+    const candidates = rows.flatMap((row, index) => {
+      const parts = row.split(/[;,\t]/).map((part) => part.trim().replace(/^"|"$/g, ""));
+      const amountIndex = parts.findIndex((part) => Number.isFinite(parseAmount(part)) && /\d/.test(part));
+      if (amountIndex < 0 || index === 0 && /valor|amount/i.test(row)) return [];
+      const amount = parseAmount(parts[amountIndex]);
+      if (!amount) return [];
+      const description = parts.find((part, partIndex) => partIndex !== amountIndex && /[a-zà-ú]/i.test(part)) || `Lançamento ${index + 1}`;
+      return [{ id: crypto.randomUUID(), name: description, category: "A classificar", date: "Importado", amount }];
+    });
+    setReview(candidates);
+  }
+
+  function approve(item: Transaction) {
+    const duplicate = transactions.some((transaction) => transaction.name === item.name && transaction.amount === item.amount);
+    if (!duplicate) setTransactions((current) => [item, ...current]);
+    setReview((current) => current.filter((candidate) => candidate.id !== item.id));
+  }
+
   return (
     <main className="shell">
       <aside className="sidebar">
@@ -18,7 +75,7 @@ export default function Home() {
           <a className="active" href="#"><Icon>▦</Icon>Visão geral</a>
           <a href="#transactions"><Icon>⇅</Icon>Transações</a>
           <a href="#imports"><Icon>↑</Icon>Importar</a>
-          <a href="#review"><Icon>✓</Icon>Revisão <b>3</b></a>
+          <a href="#review"><Icon>✓</Icon>Revisão {review.length > 0 && <b>{review.length}</b>}</a>
           <a href="#"><Icon>◎</Icon>Orçamentos</a>
           <a href="#"><Icon>▤</Icon>Relatórios</a>
         </nav>
@@ -32,7 +89,7 @@ export default function Home() {
       <section className="content">
         <header>
           <div><p className="eyebrow">DOMINGO, 30 DE AGOSTO</p><h1>Boa tarde, Marcos</h1><p>Aqui está o resumo das suas finanças.</p></div>
-          <button className="primary">+ Nova transação</button>
+          <button className="primary" onClick={() => setShowForm(true)}>+ Nova transação</button>
         </header>
 
         <div className="summaryGrid">
@@ -64,11 +121,15 @@ export default function Home() {
 
         <article className="card transactions" id="transactions">
           <div className="cardTitle"><div><h2>Transações recentes</h2><p>Seus últimos lançamentos</p></div><a href="#">Ver todas →</a></div>
-          <div className="transactionList">{transactions.map((item) => <div className="transaction" key={item.name}><div className={`transactionIcon ${item.tone}`}>◇</div><div><strong>{item.name}</strong><p>{item.category} • {item.date}</p></div><b className={item.tone}>{item.value}</b><button aria-label={`Opções de ${item.name}`}>⋮</button></div>)}</div>
+          <div className="transactionList">{transactions.map((item) => <div className="transaction" key={item.id}><div className={`transactionIcon ${item.amount >= 0 ? "green" : "red"}`}>◇</div><div><strong>{item.name}</strong><p>{item.category} • {item.date}</p></div><b className={item.amount >= 0 ? "green" : "red"}>{item.amount >= 0 ? "+ " : "- "}{money.format(Math.abs(item.amount))}</b><button aria-label={`Opções de ${item.name}`}>⋮</button></div>)}</div>
         </article>
 
-        <section className="importStrip" id="imports"><div><span>↑</span><div><strong>Importe seu extrato ou uma nota fiscal</strong><p>OFX, CSV, PDF ou imagem. A IA extrai e organiza para você revisar.</p></div></div><button>Selecionar arquivo</button></section>
+        {review.length > 0 && <article className="card reviewCard" id="review"><div className="cardTitle"><div><h2>Revisar importação</h2><p>Confirme os lançamentos antes de afetarem o saldo</p></div><button onClick={() => setReview([])}>Descartar todos</button></div>{review.map((item) => <div className="reviewRow" key={item.id}><div><strong>{item.name}</strong><p>{item.category} • {money.format(item.amount)}</p></div><button onClick={() => setReview((current) => current.filter((candidate) => candidate.id !== item.id))}>Ignorar</button><button className="approve" onClick={() => approve(item)}>Aprovar</button></div>)}</article>}
+
+        <section className="importStrip" id="imports"><div><span>↑</span><div><strong>Importe seu extrato bancário</strong><p>CSV funciona agora. OFX, PDF e imagens entram na próxima integração.</p></div></div><input ref={fileInput} type="file" accept=".csv,.txt" hidden onChange={(event) => importStatement(event.target.files?.[0])}/><button onClick={() => fileInput.current?.click()}>Selecionar arquivo</button></section>
       </section>
+
+      {showForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowForm(false)}><form className="transactionForm" onSubmit={addTransaction} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>Nova transação</h2><p>Adicione uma receita ou despesa.</p></div><button type="button" onClick={() => setShowForm(false)}>×</button></div><label>Descrição<input name="description" required placeholder="Ex.: Almoço"/></label><div className="formGrid"><label>Valor<input name="amount" required inputMode="decimal" placeholder="0,00"/></label><label>Tipo<select name="type"><option value="expense">Despesa</option><option value="income">Receita</option></select></label></div><label>Categoria<select name="category"><option>Alimentação</option><option>Moradia</option><option>Transporte</option><option>Lazer</option><option>Saúde</option><option>Receita</option><option>Outros</option></select></label><button className="primary formSubmit" type="submit">Salvar transação</button></form></div>}
     </main>
   );
 }
