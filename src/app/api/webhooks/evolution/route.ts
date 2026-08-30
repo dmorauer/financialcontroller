@@ -67,13 +67,14 @@ export async function POST(request: Request) {
   const instance = payload.instance;
   const messageId = payload.data?.key?.id;
   const remoteJid = payload.data?.key?.remoteJid;
-  if (!instance || !messageId || !remoteJid || payload.data?.key?.fromMe) {
+  if (!instance || !messageId || !remoteJid) {
     return NextResponse.json({ received: true, ignored: true });
   }
 
   const text = messageText(payload);
   const isGroup = remoteJid.endsWith("@g.us");
   const command = text && isGroup ? parseGroupCommand(text) : null;
+  if (payload.data?.key?.fromMe && !isGroup) return NextResponse.json({ received: true, ignored: true });
   if (isGroup && !command) return NextResponse.json({ received: true, ignored: true, reason: "group_message_without_command" });
 
   const admin = createAdminClient();
@@ -90,7 +91,7 @@ export async function POST(request: Request) {
     ? payload.data?.key?.participantAlt || payload.data?.key?.participant || "unknown"
     : remoteJid;
   const senderPhone = senderJid.split("@")[0].replace(/\D/g, "");
-  if (isGroup) {
+  if (isGroup && !payload.data?.key?.fromMe) {
     const { data: allowed } = await admin
       .from("whatsapp_allowed_senders")
       .select("id")
