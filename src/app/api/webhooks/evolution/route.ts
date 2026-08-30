@@ -87,14 +87,28 @@ export async function POST(request: Request) {
   if (!connection) return NextResponse.json({ received: true, ignored: true });
 
   const senderJid = isGroup
-    ? payload.data?.key?.participant || payload.data?.key?.participantAlt || "unknown"
+    ? payload.data?.key?.participantAlt || payload.data?.key?.participant || "unknown"
     : remoteJid;
+  const senderPhone = senderJid.split("@")[0].replace(/\D/g, "");
+  if (isGroup) {
+    const { data: allowed } = await admin
+      .from("whatsapp_allowed_senders")
+      .select("id")
+      .eq("user_id", connection.user_id)
+      .eq("phone", senderPhone)
+      .eq("active", true)
+      .maybeSingle();
+    if (!allowed) {
+      await sendEvolutionText(instance, remoteJid, "🔒 Este número não está autorizado a lançar despesas neste grupo.").catch(() => false);
+      return NextResponse.json({ received: true, ignored: true, reason: "sender_not_allowed" });
+    }
+  }
   const safePayload = { ...payload, apikey: undefined };
   const { error: messageError } = await admin.from("whatsapp_messages").insert({
     user_id: connection.user_id,
     connection_id: connection.id,
     wa_message_id: `evolution:${instance}:${messageId}`,
-    from_phone: senderJid.split("@")[0],
+    from_phone: senderPhone,
     direction: "inbound",
     message_type: payload.data?.messageType || "unknown",
     payload: safePayload,
@@ -123,7 +137,7 @@ export async function POST(request: Request) {
       source: "evolution",
       original_text: text,
       sender_name: payload.data?.pushName,
-      sender_phone: senderJid.split("@")[0],
+      sender_phone: senderPhone,
       group_id: isGroup ? remoteJid : null,
       group_command: command?.kind ?? null,
     },

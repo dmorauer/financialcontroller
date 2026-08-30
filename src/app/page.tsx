@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 type Transaction = { id: string; name: string; category: string; date: string; occurredOn: string; amount: number; accountId?: string | null };
 type Account = { id: string; name: string; kind: string; institution: string | null; openingBalance: number };
 type Budget = { id: string; category: string; month: string; amount: number };
+type AllowedSender = { id: string; name: string; phone: string; active: boolean };
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -30,6 +31,8 @@ export default function Home() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [showBudgetForm, setShowBudgetForm] = useState(false);
+  const [allowedSenders, setAllowedSenders] = useState<AllowedSender[]>([]);
+  const [showSenderForm, setShowSenderForm] = useState(false);
   const [assistantText, setAssistantText] = useState("");
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantMessage, setAssistantMessage] = useState("");
@@ -70,13 +73,15 @@ export default function Home() {
       setUserId(data.user.id);
       setUserEmail(data.user.email ?? "Minha conta");
       const currentMonth = `${new Date().toISOString().slice(0, 7)}-01`;
-      const [{ data: rows }, { data: accountRows }, { data: budgetRows }] = await Promise.all([
+      const [{ data: rows }, { data: accountRows }, { data: budgetRows }, { data: senderRows }] = await Promise.all([
         supabase.from("transactions").select("id, description, amount, occurred_on, raw_data, status, account_id").neq("status", "ignored").order("occurred_on", { ascending: false }).limit(100),
         supabase.from("accounts").select("id, name, kind, institution, opening_balance").order("created_at"),
         supabase.from("budgets").select("id, category, month, amount").eq("month", currentMonth).order("category"),
+        supabase.from("whatsapp_allowed_senders").select("id, name, phone, active").order("name"),
       ]);
       setAccounts((accountRows ?? []).map((account) => ({ id: account.id, name: account.name, kind: account.kind, institution: account.institution, openingBalance: Number(account.opening_balance) })));
       setBudgets((budgetRows ?? []).map((budget) => ({ id: budget.id, category: budget.category, month: budget.month, amount: Number(budget.amount) })));
+      setAllowedSenders((senderRows ?? []).map((sender) => ({ id: sender.id, name: sender.name, phone: sender.phone, active: sender.active })));
       const mapped = (rows ?? []).map((row) => ({
         id: row.id,
         name: row.description,
@@ -162,6 +167,26 @@ export default function Home() {
     } finally {
       setAssistantLoading(false);
     }
+  }
+
+  async function addAllowedSender(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!userId) return;
+    const data = new FormData(event.currentTarget);
+    const phone = String(data.get("phone")).replace(/\D/g, "");
+    if (phone.length < 10 || phone.length > 15) return window.alert("Informe o número com DDD e código do país. Ex.: 5547999999999.");
+    const candidate = { user_id: userId, name: String(data.get("name")).trim(), phone, active: true };
+    const { data: saved, error } = await createClient().from("whatsapp_allowed_senders").upsert(candidate, { onConflict: "user_id,phone" }).select("id, name, phone, active").single();
+    if (error) return window.alert(`Não foi possível autorizar: ${error.message}`);
+    setAllowedSenders((current) => [...current.filter((item) => item.phone !== saved.phone), saved].sort((a, b) => a.name.localeCompare(b.name)));
+    setShowSenderForm(false);
+  }
+
+  async function removeAllowedSender(sender: AllowedSender) {
+    if (!window.confirm(`Remover a autorização de ${sender.name}?`)) return;
+    const { error } = await createClient().from("whatsapp_allowed_senders").delete().eq("id", sender.id);
+    if (error) return window.alert(`Não foi possível remover: ${error.message}`);
+    setAllowedSenders((current) => current.filter((item) => item.id !== sender.id));
   }
 
   async function deleteTransaction() {
@@ -269,6 +294,8 @@ export default function Home() {
 
         <article className="card accountsCard" id="accounts"><div className="cardTitle"><div><h2>Minhas contas</h2><p>Saldos iniciais e movimentações vinculadas</p></div><button onClick={() => setShowAccountForm(true)}>+ Adicionar conta</button></div><div className="accountList">{accounts.length === 0 ? <div className="emptyState compact"><strong>Nenhuma conta cadastrada</strong><p>Cadastre sua conta bancária, carteira ou cartão.</p></div> : accounts.map((account) => { const accountBalance = account.openingBalance + transactions.filter((item) => item.accountId === account.id).reduce((total, item) => total + item.amount, 0); return <div className="accountItem" key={account.id}><div><strong>{account.name}</strong><p>{account.institution || "Sem instituição"}</p></div><b>{money.format(accountBalance)}</b></div>; })}</div></article>
 
+        <article className="card allowedSendersCard" id="allowed-senders"><div className="cardTitle"><div><h2>Quem pode lançar pelo WhatsApp</h2><p>Somente estes números podem usar comandos nos grupos</p></div><button onClick={() => setShowSenderForm(true)}>+ Autorizar número</button></div><div className="senderList">{allowedSenders.length === 0 ? <div className="emptyState compact"><strong>Nenhum número autorizado</strong><p>Os comandos enviados em grupos ficarão bloqueados até você adicionar alguém.</p></div> : allowedSenders.map((sender) => <div className="senderItem" key={sender.id}><div className="senderAvatar">{sender.name.slice(0, 2).toUpperCase()}</div><div><strong>{sender.name}</strong><p>+{sender.phone}</p></div><span>Autorizado</span><button onClick={() => removeAllowedSender(sender)} aria-label={`Remover ${sender.name}`}>Remover</button></div>)}</div></article>
+
         <div className="mainGrid">
           <article className="card spending">
             <div className="cardTitle"><div><h2>Despesas por categoria</h2><p className="capitalize">{monthLabel}</p></div><button>Este mês</button></div>
@@ -305,6 +332,7 @@ export default function Home() {
       {showForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowForm(false)}><form className="transactionForm" onSubmit={addTransaction} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>{editingTransaction ? "Editar transação" : "Nova transação"}</h2><p>Informe os dados reais do lançamento.</p></div><button type="button" onClick={() => setShowForm(false)}>×</button></div><label>Descrição<input name="description" required defaultValue={editingTransaction?.name} placeholder="Ex.: Almoço"/></label><div className="formGrid"><label>Valor<input name="amount" required inputMode="decimal" defaultValue={editingTransaction ? Math.abs(editingTransaction.amount).toFixed(2).replace(".", ",") : ""} placeholder="0,00"/></label><label>Tipo<select name="type" defaultValue={editingTransaction?.amount && editingTransaction.amount > 0 ? "income" : "expense"}><option value="expense">Despesa</option><option value="income">Receita</option></select></label></div><div className="formGrid"><label>Data<input name="date" type="date" required defaultValue={editingTransaction?.occurredOn || new Date().toISOString().slice(0, 10)}/></label><label>Conta<select name="account" defaultValue={editingTransaction?.accountId || ""}><option value="">Sem conta</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label></div><label>Categoria<select name="category" defaultValue={editingTransaction?.category || "Alimentação"}><option>Alimentação</option><option>Moradia</option><option>Transporte</option><option>Lazer</option><option>Saúde</option><option>Receita</option><option>Outros</option></select></label><div className="formActions">{editingTransaction && <button className="dangerButton" type="button" onClick={deleteTransaction}>Excluir</button>}<button className="primary formSubmit" type="submit">Salvar transação</button></div></form></div>}
       {showAccountForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowAccountForm(false)}><form className="transactionForm" onSubmit={addAccount} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>Adicionar conta</h2><p>O saldo inicial entra no seu saldo total.</p></div><button type="button" onClick={() => setShowAccountForm(false)}>×</button></div><label>Nome da conta<input name="name" required placeholder="Ex.: Nubank"/></label><label>Instituição<input name="institution" placeholder="Ex.: Nu Pagamentos"/></label><div className="formGrid"><label>Tipo<select name="kind"><option value="checking">Conta-corrente</option><option value="savings">Poupança</option><option value="cash">Dinheiro</option><option value="credit_card">Cartão de crédito</option><option value="investment">Investimento</option></select></label><label>Saldo inicial<input name="openingBalance" inputMode="decimal" defaultValue="0,00"/></label></div><button className="primary formSubmit" type="submit">Criar conta</button></form></div>}
       {showBudgetForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowBudgetForm(false)}><form className="transactionForm" onSubmit={saveBudget} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>Definir orçamento</h2><p className="capitalize">Limite para {monthLabel}.</p></div><button type="button" onClick={() => setShowBudgetForm(false)}>×</button></div><label>Categoria<select name="category" defaultValue="Alimentação"><option>Alimentação</option><option>Moradia</option><option>Transporte</option><option>Lazer</option><option>Saúde</option><option>Outros</option></select></label><label>Limite mensal<input name="amount" required inputMode="decimal" placeholder="Ex.: 800,00"/></label><button className="primary formSubmit" type="submit">Salvar orçamento</button></form></div>}
+      {showSenderForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowSenderForm(false)}><form className="transactionForm" onSubmit={addAllowedSender} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>Autorizar participante</h2><p>Ele poderá lançar despesas e receitas nos grupos.</p></div><button type="button" onClick={() => setShowSenderForm(false)}>×</button></div><label>Nome<input name="name" required maxLength={80} placeholder="Ex.: Douglas"/></label><label>Número do WhatsApp<input name="phone" required inputMode="tel" placeholder="Ex.: +55 47 99999-9999"/></label><p className="formHint">Inclua o código do país e o DDD.</p><button className="primary formSubmit" type="submit">Autorizar número</button></form></div>}
     </main>
   );
 }
