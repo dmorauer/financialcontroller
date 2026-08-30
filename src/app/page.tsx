@@ -4,7 +4,8 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-type Transaction = { id: string; name: string; category: string; date: string; occurredOn: string; amount: number };
+type Transaction = { id: string; name: string; category: string; date: string; occurredOn: string; amount: number; accountId?: string | null };
+type Account = { id: string; name: string; kind: string; institution: string | null; openingBalance: number };
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -23,6 +24,9 @@ export default function Home() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [review, setReview] = useState<Transaction[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [showAccountForm, setShowAccountForm] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [importing, setImporting] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [userId, setUserId] = useState<string>();
@@ -35,7 +39,7 @@ export default function Home() {
   const currentMonth = useMemo(() => transactions.filter((item) => item.occurredOn.startsWith(monthKey)), [transactions, monthKey]);
   const income = currentMonth.reduce((total, item) => total + Math.max(item.amount, 0), 0);
   const expenses = currentMonth.reduce((total, item) => total + Math.abs(Math.min(item.amount, 0)), 0);
-  const balance = transactions.reduce((total, item) => total + item.amount, 0);
+  const balance = accounts.reduce((total, account) => total + account.openingBalance, 0) + transactions.reduce((total, item) => total + item.amount, 0);
   const categories = useMemo(() => {
     const totals = new Map<string, number>();
     currentMonth.filter((item) => item.amount < 0).forEach((item) => totals.set(item.category, (totals.get(item.category) ?? 0) + Math.abs(item.amount)));
@@ -57,13 +61,18 @@ export default function Home() {
       }
       setUserId(data.user.id);
       setUserEmail(data.user.email ?? "Minha conta");
-      const { data: rows } = await supabase.from("transactions").select("id, description, amount, occurred_on, raw_data, status").neq("status", "ignored").order("occurred_on", { ascending: false }).limit(100);
+      const [{ data: rows }, { data: accountRows }] = await Promise.all([
+        supabase.from("transactions").select("id, description, amount, occurred_on, raw_data, status, account_id").neq("status", "ignored").order("occurred_on", { ascending: false }).limit(100),
+        supabase.from("accounts").select("id, name, kind, institution, opening_balance").order("created_at"),
+      ]);
+      setAccounts((accountRows ?? []).map((account) => ({ id: account.id, name: account.name, kind: account.kind, institution: account.institution, openingBalance: Number(account.opening_balance) })));
       const mapped = (rows ?? []).map((row) => ({
         id: row.id,
         name: row.description,
         category: String((row.raw_data as { category?: string } | null)?.category ?? "Outros"),
         date: new Date(`${row.occurred_on}T12:00:00`).toLocaleDateString("pt-BR"),
         amount: Number(row.amount),
+        accountId: row.account_id,
         occurredOn: row.occurred_on,
         status: row.status,
       }));
@@ -83,12 +92,38 @@ export default function Home() {
       user_id: userId,
       description: String(data.get("description")),
       amount: type === "expense" ? -Math.abs(entered) : Math.abs(entered),
-      occurred_on: new Date().toISOString().slice(0, 10),
+      occurred_on: String(data.get("date")),
+      account_id: data.get("account") || null,
       raw_data: { category: String(data.get("category")) },
     };
-    const { data: saved, error } = await createClient().from("transactions").insert(candidate).select("id").single();
+    const query = editingTransaction
+      ? createClient().from("transactions").update(candidate).eq("id", editingTransaction.id)
+      : createClient().from("transactions").insert(candidate);
+    const { data: saved, error } = await query.select("id").single();
     if (error) return window.alert(`Não foi possível salvar: ${error.message}`);
-    setTransactions((current) => [{ id: saved.id, name: candidate.description, category: String(data.get("category")), date: "Agora", occurredOn: candidate.occurred_on, amount: candidate.amount }, ...current]);
+    const updated = { id: saved.id, name: candidate.description, category: String(data.get("category")), date: new Date(`${candidate.occurred_on}T12:00:00`).toLocaleDateString("pt-BR"), occurredOn: candidate.occurred_on, amount: candidate.amount, accountId: candidate.account_id ? String(candidate.account_id) : null };
+    setTransactions((current) => [updated, ...current.filter((item) => item.id !== saved.id)]);
+    setEditingTransaction(null);
+    setShowForm(false);
+  }
+
+  async function addAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!userId) return;
+    const data = new FormData(event.currentTarget);
+    const candidate = { user_id: userId, name: String(data.get("name")), kind: String(data.get("kind")), institution: String(data.get("institution")) || null, opening_balance: parseAmount(String(data.get("openingBalance"))) || 0 };
+    const { data: saved, error } = await createClient().from("accounts").insert(candidate).select("id").single();
+    if (error) return window.alert(`Não foi possível criar a conta: ${error.message}`);
+    setAccounts((current) => [...current, { id: saved.id, name: candidate.name, kind: candidate.kind, institution: candidate.institution, openingBalance: candidate.opening_balance }]);
+    setShowAccountForm(false);
+  }
+
+  async function deleteTransaction() {
+    if (!editingTransaction || !window.confirm("Excluir esta transação definitivamente?")) return;
+    const { error } = await createClient().from("transactions").delete().eq("id", editingTransaction.id);
+    if (error) return window.alert(`Não foi possível excluir: ${error.message}`);
+    setTransactions((current) => current.filter((item) => item.id !== editingTransaction.id));
+    setEditingTransaction(null);
     setShowForm(false);
   }
 
@@ -177,7 +212,7 @@ export default function Home() {
       <section className="content">
         <header>
           <div><p className="eyebrow">{dateLabel}</p><h1>Suas finanças</h1><p>Resumo calculado somente com seus lançamentos confirmados.</p></div>
-          <button className="primary" onClick={() => setShowForm(true)}>+ Nova transação</button>
+          <button className="primary" onClick={() => { setEditingTransaction(null); setShowForm(true); }}>+ Nova transação</button>
         </header>
 
         <div className="summaryGrid">
@@ -185,6 +220,8 @@ export default function Home() {
           <article className="metric"><span>Receitas no mês</span><strong>{money.format(income)}</strong><p className="positive">{currentMonth.filter((item) => item.amount > 0).length} entradas</p></article>
           <article className="metric"><span>Despesas no mês</span><strong>{money.format(expenses)}</strong><p className="negative">{currentMonth.filter((item) => item.amount < 0).length} saídas</p></article>
         </div>
+
+        <article className="card accountsCard" id="accounts"><div className="cardTitle"><div><h2>Minhas contas</h2><p>Saldos iniciais e movimentações vinculadas</p></div><button onClick={() => setShowAccountForm(true)}>+ Adicionar conta</button></div><div className="accountList">{accounts.length === 0 ? <div className="emptyState compact"><strong>Nenhuma conta cadastrada</strong><p>Cadastre sua conta bancária, carteira ou cartão.</p></div> : accounts.map((account) => { const accountBalance = account.openingBalance + transactions.filter((item) => item.accountId === account.id).reduce((total, item) => total + item.amount, 0); return <div className="accountItem" key={account.id}><div><strong>{account.name}</strong><p>{account.institution || "Sem instituição"}</p></div><b>{money.format(accountBalance)}</b></div>; })}</div></article>
 
         <div className="mainGrid">
           <article className="card spending">
@@ -205,7 +242,7 @@ export default function Home() {
 
         <article className="card transactions" id="transactions">
           <div className="cardTitle"><div><h2>Transações recentes</h2><p>Seus últimos lançamentos</p></div><a href="#">Ver todas →</a></div>
-          <div className="transactionList">{transactions.length === 0 ? <div className="emptyState"><strong>Nenhuma transação confirmada</strong><p>Adicione uma transação ou importe um extrato para começar.</p></div> : transactions.map((item) => <div className="transaction" key={item.id}><div className={`transactionIcon ${item.amount >= 0 ? "green" : "red"}`}>◇</div><div><strong>{item.name}</strong><p>{item.category} • {item.date}</p></div><b className={item.amount >= 0 ? "green" : "red"}>{item.amount >= 0 ? "+ " : "- "}{money.format(Math.abs(item.amount))}</b><button aria-label={`Opções de ${item.name}`}>⋮</button></div>)}</div>
+          <div className="transactionList">{transactions.length === 0 ? <div className="emptyState"><strong>Nenhuma transação confirmada</strong><p>Adicione uma transação ou importe um extrato para começar.</p></div> : transactions.map((item) => <div className="transaction" key={item.id}><div className={`transactionIcon ${item.amount >= 0 ? "green" : "red"}`}>◇</div><div><strong>{item.name}</strong><p>{item.category} • {item.date}{item.accountId ? ` • ${accounts.find((account) => account.id === item.accountId)?.name || "Conta"}` : ""}</p></div><b className={item.amount >= 0 ? "green" : "red"}>{item.amount >= 0 ? "+ " : "- "}{money.format(Math.abs(item.amount))}</b><button aria-label={`Editar ${item.name}`} onClick={() => { setEditingTransaction(item); setShowForm(true); }}>⋮</button></div>)}</div>
         </article>
 
         {review.length > 0 && <article className="card reviewCard" id="review"><div className="cardTitle"><div><h2>Revisar importação</h2><p>Confirme os lançamentos antes de afetarem o saldo</p></div><button onClick={() => setReview([])}>Fechar fila</button></div>{review.map((item) => <div className="reviewRow" key={item.id}><div><strong>{item.name}</strong><p>{item.category} • {money.format(item.amount)}</p></div><button onClick={() => ignoreReview(item)}>Ignorar</button><button className="approve" onClick={() => approve(item)}>Aprovar</button></div>)}</article>}
@@ -213,7 +250,8 @@ export default function Home() {
         <section className="importStrip" id="imports"><div><span>↑</span><div><strong>Importe extratos, notas e comprovantes</strong><p>CSV, PDF, JPG, PNG ou WEBP. Documentos ficam privados e passam por revisão.</p></div></div><input ref={fileInput} type="file" accept=".csv,.txt,.pdf,.jpg,.jpeg,.png,.webp" hidden onChange={(event) => importStatement(event.target.files?.[0])}/><button disabled={importing} onClick={() => fileInput.current?.click()}>{importing ? "Analisando..." : "Selecionar arquivo"}</button></section>
       </section>
 
-      {showForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowForm(false)}><form className="transactionForm" onSubmit={addTransaction} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>Nova transação</h2><p>Adicione uma receita ou despesa.</p></div><button type="button" onClick={() => setShowForm(false)}>×</button></div><label>Descrição<input name="description" required placeholder="Ex.: Almoço"/></label><div className="formGrid"><label>Valor<input name="amount" required inputMode="decimal" placeholder="0,00"/></label><label>Tipo<select name="type"><option value="expense">Despesa</option><option value="income">Receita</option></select></label></div><label>Categoria<select name="category"><option>Alimentação</option><option>Moradia</option><option>Transporte</option><option>Lazer</option><option>Saúde</option><option>Receita</option><option>Outros</option></select></label><button className="primary formSubmit" type="submit">Salvar transação</button></form></div>}
+      {showForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowForm(false)}><form className="transactionForm" onSubmit={addTransaction} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>{editingTransaction ? "Editar transação" : "Nova transação"}</h2><p>Informe os dados reais do lançamento.</p></div><button type="button" onClick={() => setShowForm(false)}>×</button></div><label>Descrição<input name="description" required defaultValue={editingTransaction?.name} placeholder="Ex.: Almoço"/></label><div className="formGrid"><label>Valor<input name="amount" required inputMode="decimal" defaultValue={editingTransaction ? Math.abs(editingTransaction.amount).toFixed(2).replace(".", ",") : ""} placeholder="0,00"/></label><label>Tipo<select name="type" defaultValue={editingTransaction?.amount && editingTransaction.amount > 0 ? "income" : "expense"}><option value="expense">Despesa</option><option value="income">Receita</option></select></label></div><div className="formGrid"><label>Data<input name="date" type="date" required defaultValue={editingTransaction?.occurredOn || new Date().toISOString().slice(0, 10)}/></label><label>Conta<select name="account" defaultValue={editingTransaction?.accountId || ""}><option value="">Sem conta</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label></div><label>Categoria<select name="category" defaultValue={editingTransaction?.category || "Alimentação"}><option>Alimentação</option><option>Moradia</option><option>Transporte</option><option>Lazer</option><option>Saúde</option><option>Receita</option><option>Outros</option></select></label><div className="formActions">{editingTransaction && <button className="dangerButton" type="button" onClick={deleteTransaction}>Excluir</button>}<button className="primary formSubmit" type="submit">Salvar transação</button></div></form></div>}
+      {showAccountForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowAccountForm(false)}><form className="transactionForm" onSubmit={addAccount} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>Adicionar conta</h2><p>O saldo inicial entra no seu saldo total.</p></div><button type="button" onClick={() => setShowAccountForm(false)}>×</button></div><label>Nome da conta<input name="name" required placeholder="Ex.: Nubank"/></label><label>Instituição<input name="institution" placeholder="Ex.: Nu Pagamentos"/></label><div className="formGrid"><label>Tipo<select name="kind"><option value="checking">Conta-corrente</option><option value="savings">Poupança</option><option value="cash">Dinheiro</option><option value="credit_card">Cartão de crédito</option><option value="investment">Investimento</option></select></label><label>Saldo inicial<input name="openingBalance" inputMode="decimal" defaultValue="0,00"/></label></div><button className="primary formSubmit" type="submit">Criar conta</button></form></div>}
     </main>
   );
 }
