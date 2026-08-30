@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-type Transaction = { id: string; name: string; category: string; date: string; occurredOn: string; amount: number; accountId?: string | null };
+type Transaction = { id: string; name: string; category: string; date: string; occurredOn: string; dueOn?: string | null; amount: number; accountId?: string | null };
 type Account = { id: string; name: string; kind: string; institution: string | null; openingBalance: number };
 type Budget = { id: string; category: string; month: string; amount: number };
 type AllowedSender = { id: string; name: string; phone: string; active: boolean };
@@ -74,7 +74,7 @@ export default function Home() {
       setUserEmail(data.user.email ?? "Minha conta");
       const currentMonth = `${new Date().toISOString().slice(0, 7)}-01`;
       const [{ data: rows }, { data: accountRows }, { data: budgetRows }, { data: senderRows }] = await Promise.all([
-        supabase.from("transactions").select("id, description, amount, occurred_on, raw_data, status, account_id").neq("status", "ignored").order("occurred_on", { ascending: false }).limit(100),
+        supabase.from("transactions").select("id, description, amount, occurred_on, due_on, raw_data, status, account_id").neq("status", "ignored").order("occurred_on", { ascending: false }).limit(100),
         supabase.from("accounts").select("id, name, kind, institution, opening_balance").order("created_at"),
         supabase.from("budgets").select("id, category, month, amount").eq("month", currentMonth).order("category"),
         supabase.from("whatsapp_allowed_senders").select("id, name, phone, active").order("name"),
@@ -90,6 +90,7 @@ export default function Home() {
         amount: Number(row.amount),
         accountId: row.account_id,
         occurredOn: row.occurred_on,
+        dueOn: row.due_on,
         status: row.status,
       }));
       setTransactions(mapped.filter((row) => row.status === "confirmed"));
@@ -98,9 +99,9 @@ export default function Home() {
   }, [router]);
 
   async function refreshReview() {
-    const { data: rows, error } = await createClient().from("transactions").select("id, description, amount, occurred_on, raw_data, account_id").eq("status", "review").order("created_at", { ascending: false }).limit(100);
+    const { data: rows, error } = await createClient().from("transactions").select("id, description, amount, occurred_on, due_on, raw_data, account_id").eq("status", "review").order("created_at", { ascending: false }).limit(100);
     if (error) return;
-    setReview((rows ?? []).map((row) => ({ id: row.id, name: row.description, category: String((row.raw_data as { category?: string } | null)?.category ?? "Outros"), date: new Date(`${row.occurred_on}T12:00:00`).toLocaleDateString("pt-BR"), occurredOn: row.occurred_on, amount: Number(row.amount), accountId: row.account_id })));
+    setReview((rows ?? []).map((row) => ({ id: row.id, name: row.description, category: String((row.raw_data as { category?: string } | null)?.category ?? "Outros"), date: new Date(`${row.occurred_on}T12:00:00`).toLocaleDateString("pt-BR"), occurredOn: row.occurred_on, dueOn: row.due_on, amount: Number(row.amount), accountId: row.account_id })));
   }
 
   useEffect(() => {
@@ -121,6 +122,7 @@ export default function Home() {
       description: String(data.get("description")),
       amount: type === "expense" ? -Math.abs(entered) : Math.abs(entered),
       occurred_on: String(data.get("date")),
+      due_on: data.get("dueDate") ? String(data.get("dueDate")) : null,
       account_id: data.get("account") || null,
       raw_data: { category: String(data.get("category")) },
     };
@@ -129,7 +131,7 @@ export default function Home() {
       : createClient().from("transactions").insert(candidate);
     const { data: saved, error } = await query.select("id").single();
     if (error) return window.alert(`Não foi possível salvar: ${error.message}`);
-    const updated = { id: saved.id, name: candidate.description, category: String(data.get("category")), date: new Date(`${candidate.occurred_on}T12:00:00`).toLocaleDateString("pt-BR"), occurredOn: candidate.occurred_on, amount: candidate.amount, accountId: candidate.account_id ? String(candidate.account_id) : null };
+    const updated = { id: saved.id, name: candidate.description, category: String(data.get("category")), date: new Date(`${candidate.occurred_on}T12:00:00`).toLocaleDateString("pt-BR"), occurredOn: candidate.occurred_on, dueOn: candidate.due_on, amount: candidate.amount, accountId: candidate.account_id ? String(candidate.account_id) : null };
     setTransactions((current) => [updated, ...current.filter((item) => item.id !== saved.id)]);
     setEditingTransaction(null);
     setShowForm(false);
@@ -276,7 +278,7 @@ export default function Home() {
   return (
     <main className="shell">
       <aside className="sidebar">
-        <div className="brand"><span className="brandMark">C</span><span>Conta Aí</span></div>
+        <div className="brand"><span className="brandMark">S</span><span>Saldo Aí</span></div>
         <nav>
           <a className="active" href="#"><Icon>▦</Icon>Visão geral</a>
           <a href="#transactions"><Icon>⇅</Icon>Transações</a>
@@ -333,7 +335,7 @@ export default function Home() {
 
         <article className="card transactions" id="transactions">
           <div className="cardTitle"><div><h2>Transações recentes</h2><p>Seus últimos lançamentos</p></div><a href="#">Ver todas →</a></div>
-          <div className="transactionList">{transactions.length === 0 ? <div className="emptyState"><strong>Nenhuma transação confirmada</strong><p>Adicione uma transação ou importe um extrato para começar.</p></div> : transactions.map((item) => <div className="transaction" key={item.id}><div className={`transactionIcon ${item.amount >= 0 ? "green" : "red"}`}>◇</div><div><strong>{item.name}</strong><p>{item.category} • {item.date}{item.accountId ? ` • ${accounts.find((account) => account.id === item.accountId)?.name || "Conta"}` : ""}</p></div><b className={item.amount >= 0 ? "green" : "red"}>{item.amount >= 0 ? "+ " : "- "}{money.format(Math.abs(item.amount))}</b><button aria-label={`Editar ${item.name}`} onClick={() => { setEditingTransaction(item); setShowForm(true); }}>⋮</button></div>)}</div>
+          <div className="transactionList">{transactions.length === 0 ? <div className="emptyState"><strong>Nenhuma transação confirmada</strong><p>Adicione uma transação ou importe um extrato para começar.</p></div> : transactions.map((item) => <div className="transaction" key={item.id}><div className={`transactionIcon ${item.amount >= 0 ? "green" : "red"}`}>◇</div><div><strong>{item.name}</strong><p>{item.category} • {item.dueOn ? `Vence ${new Date(`${item.dueOn}T12:00:00`).toLocaleDateString("pt-BR")}` : item.date}{item.accountId ? ` • ${accounts.find((account) => account.id === item.accountId)?.name || "Conta"}` : ""}</p></div><b className={item.amount >= 0 ? "green" : "red"}>{item.amount >= 0 ? "+ " : "- "}{money.format(Math.abs(item.amount))}</b><button aria-label={`Editar ${item.name}`} onClick={() => { setEditingTransaction(item); setShowForm(true); }}>⋮</button></div>)}</div>
         </article>
 
         <article className="card reviewCard" id="review"><div className="cardTitle"><div><h2>Revisão de lançamentos</h2><p>Confirme os itens recebidos pelo WhatsApp ou por importação</p></div><button onClick={() => void refreshReview()}>Atualizar fila</button></div>{review.length === 0 ? <div className="emptyState"><strong>Nenhum lançamento aguardando revisão</strong><p>Novos comandos do WhatsApp aparecerão aqui automaticamente.</p></div> : review.map((item) => <div className="reviewRow" key={item.id}><div><strong>{item.name}</strong><p>{item.category} • {money.format(item.amount)}</p></div><button onClick={() => ignoreReview(item)}>Ignorar</button><button className="approve" onClick={() => approve(item)}>Aprovar</button></div>)}</article>
@@ -341,7 +343,7 @@ export default function Home() {
         <section className="importStrip" id="imports"><div><span>↑</span><div><strong>Importe extratos, notas e comprovantes</strong><p>CSV, PDF, JPG, PNG ou WEBP. Documentos ficam privados e passam por revisão.</p></div></div><input ref={fileInput} type="file" accept=".csv,.txt,.pdf,.jpg,.jpeg,.png,.webp" hidden onChange={(event) => importStatement(event.target.files?.[0])}/><button disabled={importing} onClick={() => fileInput.current?.click()}>{importing ? "Analisando..." : "Selecionar arquivo"}</button></section>
       </section>
 
-      {showForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowForm(false)}><form className="transactionForm" onSubmit={addTransaction} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>{editingTransaction ? "Editar transação" : "Nova transação"}</h2><p>Informe os dados reais do lançamento.</p></div><button type="button" onClick={() => setShowForm(false)}>×</button></div><label>Descrição<input name="description" required defaultValue={editingTransaction?.name} placeholder="Ex.: Almoço"/></label><div className="formGrid"><label>Valor<input name="amount" required inputMode="decimal" defaultValue={editingTransaction ? Math.abs(editingTransaction.amount).toFixed(2).replace(".", ",") : ""} placeholder="0,00"/></label><label>Tipo<select name="type" defaultValue={editingTransaction?.amount && editingTransaction.amount > 0 ? "income" : "expense"}><option value="expense">Despesa</option><option value="income">Receita</option></select></label></div><div className="formGrid"><label>Data<input name="date" type="date" required defaultValue={editingTransaction?.occurredOn || new Date().toISOString().slice(0, 10)}/></label><label>Conta<select name="account" defaultValue={editingTransaction?.accountId || ""}><option value="">Sem conta</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label></div><label>Categoria<select name="category" defaultValue={editingTransaction?.category || "Alimentação"}><option>Alimentação</option><option>Moradia</option><option>Transporte</option><option>Lazer</option><option>Saúde</option><option>Receita</option><option>Outros</option></select></label><div className="formActions">{editingTransaction && <button className="dangerButton" type="button" onClick={deleteTransaction}>Excluir</button>}<button className="primary formSubmit" type="submit">Salvar transação</button></div></form></div>}
+      {showForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowForm(false)}><form className="transactionForm" onSubmit={addTransaction} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>{editingTransaction ? "Editar transação" : "Nova transação"}</h2><p>Informe os dados reais do lançamento.</p></div><button type="button" onClick={() => setShowForm(false)}>×</button></div><label>Descrição<input name="description" required defaultValue={editingTransaction?.name} placeholder="Ex.: Almoço"/></label><div className="formGrid"><label>Valor<input name="amount" required inputMode="decimal" defaultValue={editingTransaction ? Math.abs(editingTransaction.amount).toFixed(2).replace(".", ",") : ""} placeholder="0,00"/></label><label>Tipo<select name="type" defaultValue={editingTransaction?.amount && editingTransaction.amount > 0 ? "income" : "expense"}><option value="expense">Despesa</option><option value="income">Receita</option></select></label></div><div className="formGrid"><label>Data do lançamento<input name="date" type="date" required defaultValue={editingTransaction?.occurredOn || new Date().toISOString().slice(0, 10)}/></label><label>Data de vencimento<input name="dueDate" type="date" defaultValue={editingTransaction?.dueOn || ""}/></label></div><label>Conta<select name="account" defaultValue={editingTransaction?.accountId || ""}><option value="">Sem conta</option>{accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label><label>Categoria<select name="category" defaultValue={editingTransaction?.category || "Alimentação"}><option>Alimentação</option><option>Moradia</option><option>Transporte</option><option>Lazer</option><option>Saúde</option><option>Receita</option><option>Outros</option></select></label><div className="formActions">{editingTransaction && <button className="dangerButton" type="button" onClick={deleteTransaction}>Excluir</button>}<button className="primary formSubmit" type="submit">Salvar transação</button></div></form></div>}
       {showAccountForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowAccountForm(false)}><form className="transactionForm" onSubmit={addAccount} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>Adicionar conta</h2><p>O saldo inicial entra no seu saldo total.</p></div><button type="button" onClick={() => setShowAccountForm(false)}>×</button></div><label>Nome da conta<input name="name" required placeholder="Ex.: Nubank"/></label><label>Instituição<input name="institution" placeholder="Ex.: Nu Pagamentos"/></label><div className="formGrid"><label>Tipo<select name="kind"><option value="checking">Conta-corrente</option><option value="savings">Poupança</option><option value="cash">Dinheiro</option><option value="credit_card">Cartão de crédito</option><option value="investment">Investimento</option></select></label><label>Saldo inicial<input name="openingBalance" inputMode="decimal" defaultValue="0,00"/></label></div><button className="primary formSubmit" type="submit">Criar conta</button></form></div>}
       {showBudgetForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowBudgetForm(false)}><form className="transactionForm" onSubmit={saveBudget} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>Definir orçamento</h2><p className="capitalize">Limite para {monthLabel}.</p></div><button type="button" onClick={() => setShowBudgetForm(false)}>×</button></div><label>Categoria<select name="category" defaultValue="Alimentação"><option>Alimentação</option><option>Moradia</option><option>Transporte</option><option>Lazer</option><option>Saúde</option><option>Outros</option></select></label><label>Limite mensal<input name="amount" required inputMode="decimal" placeholder="Ex.: 800,00"/></label><button className="primary formSubmit" type="submit">Salvar orçamento</button></form></div>}
       {showSenderForm && <div className="modalBackdrop" role="presentation" onMouseDown={() => setShowSenderForm(false)}><form className="transactionForm" onSubmit={addAllowedSender} onMouseDown={(event) => event.stopPropagation()}><div className="formHead"><div><h2>Autorizar participante</h2><p>Ele poderá lançar despesas e receitas nos grupos.</p></div><button type="button" onClick={() => setShowSenderForm(false)}>×</button></div><label>Nome<input name="name" required maxLength={80} placeholder="Ex.: Douglas"/></label><label>Número do WhatsApp<input name="phone" required inputMode="tel" placeholder="Ex.: +55 47 99999-9999"/></label><p className="formHint">Inclua o código do país e o DDD.</p><button className="primary formSubmit" type="submit">Autorizar número</button></form></div>}

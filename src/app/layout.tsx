@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Conta Aí | Seu dinheiro organizado",
+  title: "Saldo Aí | Seu dinheiro organizado",
   description: "Organize suas finanças por WhatsApp, extratos e notas fiscais.",
 };
 

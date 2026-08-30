@@ -12,6 +12,7 @@ const transactionSchema = z.object({
   type: z.enum(["expense", "income"]),
   category: categorySchema,
   occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Data no formato YYYY-MM-DD"),
+  dueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().describe("Data de vencimento citada ou null"),
 });
 
 function fallbackTransaction(text: string, today: string) {
@@ -23,6 +24,7 @@ function fallbackTransaction(text: string, today: string) {
     type: parsed.amount > 0 ? "income" as const : "expense" as const,
     category: categorySchema.parse(parsed.category),
     occurredOn: today,
+    dueOn: parsed.dueOn,
   };
 }
 
@@ -66,9 +68,10 @@ Mensagem: ${JSON.stringify(text)}`,
     description: extracted.description,
     amount,
     occurred_on: extracted.occurredOn,
+    due_on: extracted.dueOn,
     status: "confirmed",
     raw_data: { category: extracted.category, source: "assistant", original_text: text },
-  }).select("id, description, amount, occurred_on, account_id").single();
+  }).select("id, description, amount, occurred_on, due_on, account_id").single();
 
   if (error) return Response.json({ error: `Não foi possível salvar: ${error.message}` }, { status: 500 });
 
@@ -79,6 +82,7 @@ Mensagem: ${JSON.stringify(text)}`,
       category: extracted.category,
       date: new Date(`${data.occurred_on}T12:00:00`).toLocaleDateString("pt-BR"),
       occurredOn: data.occurred_on,
+      dueOn: data.due_on,
       amount: Number(data.amount),
       accountId: data.account_id,
     },

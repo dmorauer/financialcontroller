@@ -72,8 +72,8 @@ export async function POST(request: Request) {
     await sendText(phoneNumberId, message.from, "Não encontrei um valor. Tente: 'gastei 45,90 no almoço'.");
     return NextResponse.json({ received: true });
   }
-  const { error: transactionError } = await admin.from("transactions").insert({ user_id: connection.user_id, description: parsed.description, amount: parsed.amount, occurred_on: new Date().toISOString().slice(0, 10), status: "review", external_id: message.id, fingerprint: `whatsapp:${message.id}`, raw_data: { category: parsed.category, source: "whatsapp", original_text: message.text.body } });
+  const { error: transactionError } = await admin.from("transactions").insert({ user_id: connection.user_id, description: parsed.description, amount: parsed.amount, occurred_on: new Date().toISOString().slice(0, 10), due_on: parsed.dueOn, status: "review", external_id: message.id, fingerprint: `whatsapp:${message.id}`, raw_data: { category: parsed.category, source: "whatsapp", original_text: message.text.body } });
   if (transactionError) return NextResponse.json({ error: "Falha ao criar transação." }, { status: 500 });
-  await sendText(phoneNumberId, message.from, `Anotei ${parsed.description}: ${formatBRL(parsed.amount)}. Abra o Conta Aí para revisar e confirmar.`);
+  await sendText(phoneNumberId, message.from, `Anotei ${parsed.description}: ${formatBRL(parsed.amount)}. Abra o Saldo Aí para revisar e confirmar.`);
   return NextResponse.json({ received: true });
 }

@@ -135,6 +135,7 @@ export async function POST(request: Request) {
     description: parsed.description,
     amount: parsed.amount,
     occurred_on: new Date().toISOString().slice(0, 10),
+    due_on: parsed.dueOn,
     status: "review",
     external_id: messageId,
     fingerprint: `evolution:${instance}:${messageId}`,
@@ -153,7 +154,8 @@ export async function POST(request: Request) {
 
   if (isGroup) {
     const sender = payload.data?.pushName ? `${payload.data.pushName}: ` : "";
-    await sendEvolutionText(instance, remoteJid, `✅ ${sender}${parsed.description} — ${formatBRL(parsed.amount)}. Lançamento enviado para revisão.`).catch(() => false);
+    const due = parsed.dueOn ? ` · vence em ${new Date(`${parsed.dueOn}T12:00:00`).toLocaleDateString("pt-BR")}` : "";
+    await sendEvolutionText(instance, remoteJid, `✅ ${sender}${parsed.description} — ${formatBRL(parsed.amount)}${due}. Lançamento enviado para revisão.`).catch(() => false);
   }
 
   return NextResponse.json({ received: true, group: isGroup, transaction: { description: parsed.description, amount: formatBRL(parsed.amount) } });
