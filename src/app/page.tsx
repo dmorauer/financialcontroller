@@ -249,7 +249,7 @@ export default function Home() {
           <a href="#"><Icon>▤</Icon>Relatórios</a>
         </nav>
         <div className="sideBottom">
-          <div className="whatsapp"><span>●</span><div><strong>WhatsApp conectado</strong><small>Evolution API ativa</small></div></div>
+          <div className="whatsapp"><span>●</span><div><strong>WhatsApp conectado</strong><small>Grupos: !gasto ou !receita</small></div></div>
           <a href="#"><Icon>⚙</Icon>Configurações</a>
           <button className="profile profileButton" onClick={signOut}><div className="avatar">FC</div><div><strong>Minha conta</strong><small>{userEmail}</small></div><span>Sair</span></button>
         </div>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { formatBRL, parseFinancialMessage } from "@/lib/finance/message-parser";
+import { parseGroupCommand } from "@/lib/finance/group-command";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
@@ -9,7 +10,7 @@ type EvolutionPayload = {
   instance?: string;
   apikey?: string;
   data?: {
-    key?: { id?: string; remoteJid?: string; fromMe?: boolean };
+    key?: { id?: string; remoteJid?: string; fromMe?: boolean; participant?: string; participantAlt?: string };
     pushName?: string;
     messageType?: string;
     message?: {
@@ -38,6 +39,18 @@ function messageText(payload: EvolutionPayload) {
     || null;
 }
 
+async function sendEvolutionText(instance: string, to: string, text: string) {
+  const apiUrl = process.env.EVOLUTION_API_URL?.replace(/\/$/, "");
+  const apiKey = process.env.EVOLUTION_API_KEY;
+  if (!apiUrl || !apiKey) return false;
+  const response = await fetch(`${apiUrl}/message/sendText/${encodeURIComponent(instance)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: apiKey },
+    body: JSON.stringify({ number: to, text }),
+  });
+  return response.ok;
+}
+
 export async function POST(request: Request) {
   if (!authorized(request)) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
@@ -54,9 +67,14 @@ export async function POST(request: Request) {
   const instance = payload.instance;
   const messageId = payload.data?.key?.id;
   const remoteJid = payload.data?.key?.remoteJid;
-  if (!instance || !messageId || !remoteJid || payload.data?.key?.fromMe || remoteJid.endsWith("@g.us")) {
+  if (!instance || !messageId || !remoteJid || payload.data?.key?.fromMe) {
     return NextResponse.json({ received: true, ignored: true });
   }
+
+  const text = messageText(payload);
+  const isGroup = remoteJid.endsWith("@g.us");
+  const command = text && isGroup ? parseGroupCommand(text) : null;
+  if (isGroup && !command) return NextResponse.json({ received: true, ignored: true, reason: "group_message_without_command" });
 
   const admin = createAdminClient();
   const { data: connection } = await admin
@@ -68,12 +86,15 @@ export async function POST(request: Request) {
     .maybeSingle();
   if (!connection) return NextResponse.json({ received: true, ignored: true });
 
+  const senderJid = isGroup
+    ? payload.data?.key?.participant || payload.data?.key?.participantAlt || "unknown"
+    : remoteJid;
   const safePayload = { ...payload, apikey: undefined };
   const { error: messageError } = await admin.from("whatsapp_messages").insert({
     user_id: connection.user_id,
     connection_id: connection.id,
     wa_message_id: `evolution:${instance}:${messageId}`,
-    from_phone: remoteJid.split("@")[0],
+    from_phone: senderJid.split("@")[0],
     direction: "inbound",
     message_type: payload.data?.messageType || "unknown",
     payload: safePayload,
@@ -81,10 +102,13 @@ export async function POST(request: Request) {
   if (messageError?.code === "23505") return NextResponse.json({ received: true, duplicate: true });
   if (messageError) return NextResponse.json({ error: "Falha ao registrar mensagem." }, { status: 500 });
 
-  const text = messageText(payload);
   if (!text) return NextResponse.json({ received: true, needs_media_processing: true });
-  const parsed = parseFinancialMessage(text);
-  if (!parsed) return NextResponse.json({ received: true, needs_value: true });
+  const financialText = command?.text ?? text;
+  const parsed = parseFinancialMessage(financialText);
+  if (!parsed) {
+    if (isGroup) await sendEvolutionText(instance, remoteJid, "Não encontrei um valor. Use, por exemplo: !gasto 50 no mercado").catch(() => false);
+    return NextResponse.json({ received: true, needs_value: true });
+  }
 
   const { error: transactionError } = await admin.from("transactions").insert({
     user_id: connection.user_id,
@@ -94,9 +118,22 @@ export async function POST(request: Request) {
     status: "review",
     external_id: messageId,
     fingerprint: `evolution:${instance}:${messageId}`,
-    raw_data: { category: parsed.category, source: "evolution", original_text: text, sender_name: payload.data?.pushName },
+    raw_data: {
+      category: parsed.category,
+      source: "evolution",
+      original_text: text,
+      sender_name: payload.data?.pushName,
+      sender_phone: senderJid.split("@")[0],
+      group_id: isGroup ? remoteJid : null,
+      group_command: command?.kind ?? null,
+    },
   });
   if (transactionError) return NextResponse.json({ error: "Falha ao criar transação." }, { status: 500 });
 
-  return NextResponse.json({ received: true, transaction: { description: parsed.description, amount: formatBRL(parsed.amount) } });
+  if (isGroup) {
+    const sender = payload.data?.pushName ? `${payload.data.pushName}: ` : "";
+    await sendEvolutionText(instance, remoteJid, `✅ ${sender}${parsed.description} — ${formatBRL(parsed.amount)}. Lançamento enviado para revisão.`).catch(() => false);
+  }
+
+  return NextResponse.json({ received: true, group: isGroup, transaction: { description: parsed.description, amount: formatBRL(parsed.amount) } });
 }
