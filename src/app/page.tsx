@@ -1,69 +1,74 @@
-import Image from "next/image";
+const transactions = [
+  { name: "Supermercado Pão de Açúcar", category: "Alimentação", date: "Hoje, 10:42", value: "- R$ 187,40", tone: "red" },
+  { name: "Salário", category: "Receita", date: "29 ago, 08:15", value: "+ R$ 8.750,00", tone: "green" },
+  { name: "Uber", category: "Transporte", date: "28 ago, 19:30", value: "- R$ 32,90", tone: "red" },
+  { name: "Conta de energia", category: "Moradia", date: "27 ago, 13:06", value: "- R$ 214,18", tone: "red" },
+];
+
+function Icon({ children }: { children: React.ReactNode }) {
+  return <span className="icon" aria-hidden="true">{children}</span>;
+}
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="shell">
+      <aside className="sidebar">
+        <div className="brand"><span className="brandMark">f</span><span>fluxo</span></div>
+        <nav>
+          <a className="active" href="#"><Icon>▦</Icon>Visão geral</a>
+          <a href="#transactions"><Icon>⇅</Icon>Transações</a>
+          <a href="#imports"><Icon>↑</Icon>Importar</a>
+          <a href="#review"><Icon>✓</Icon>Revisão <b>3</b></a>
+          <a href="#"><Icon>◎</Icon>Orçamentos</a>
+          <a href="#"><Icon>▤</Icon>Relatórios</a>
+        </nav>
+        <div className="sideBottom">
+          <div className="whatsapp"><span>●</span><div><strong>WhatsApp conectado</strong><small>Pronto para receber</small></div></div>
+          <a href="#"><Icon>⚙</Icon>Configurações</a>
+          <div className="profile"><div className="avatar">MR</div><div><strong>Marcos Ribeiro</strong><small>marcos@email.com</small></div><span>⋮</span></div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </aside>
+
+      <section className="content">
+        <header>
+          <div><p className="eyebrow">DOMINGO, 30 DE AGOSTO</p><h1>Boa tarde, Marcos</h1><p>Aqui está o resumo das suas finanças.</p></div>
+          <button className="primary">+ Nova transação</button>
+        </header>
+
+        <div className="summaryGrid">
+          <article className="balanceCard"><div><span>Saldo total</span><small>• Atualizado agora</small></div><strong>R$ 12.486,32</strong><p><em>↑ 8,4%</em> em relação ao mês passado</p><div className="spark"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></div></article>
+          <article className="metric"><span>Receitas no mês</span><strong>R$ 10.250,00</strong><p className="positive">↑ R$ 750,00 este mês</p></article>
+          <article className="metric"><span>Despesas no mês</span><strong>R$ 5.763,68</strong><p className="negative">↑ 12% acima da média</p></article>
         </div>
-      </main>
-    </div>
+
+        <div className="mainGrid">
+          <article className="card spending">
+            <div className="cardTitle"><div><h2>Despesas por categoria</h2><p>Agosto de 2026</p></div><button>Este mês ⌄</button></div>
+            <div className="donutWrap"><div className="donut"><div><small>Total</small><strong>R$ 5.763</strong></div></div>
+              <div className="legend">
+                <p><i className="c1"/><span>Moradia</span><b>R$ 2.140</b><small>37%</small></p>
+                <p><i className="c2"/><span>Alimentação</span><b>R$ 1.326</b><small>23%</small></p>
+                <p><i className="c3"/><span>Transporte</span><b>R$ 864</b><small>15%</small></p>
+                <p><i className="c4"/><span>Lazer</span><b>R$ 634</b><small>11%</small></p>
+                <p><i className="c5"/><span>Outros</span><b>R$ 799</b><small>14%</small></p>
+              </div>
+            </div>
+          </article>
+
+          <article className="card assistantCard">
+            <div className="aiHead"><span>✦</span><div><h2>Assistente financeiro</h2><p>Análise inteligente</p></div></div>
+            <div className="insight"><span>💡</span><div><strong>Você gastou 18% a mais com alimentação</strong><p>Se mantiver o ritmo, fechará o mês R$ 240 acima da sua média.</p><a href="#">Ver detalhes →</a></div></div>
+            <div className="quickAsk"><span>✦</span><input aria-label="Pergunte ao assistente" placeholder="Pergunte sobre suas finanças..."/><button>↑</button></div>
+          </article>
+        </div>
+
+        <article className="card transactions" id="transactions">
+          <div className="cardTitle"><div><h2>Transações recentes</h2><p>Seus últimos lançamentos</p></div><a href="#">Ver todas →</a></div>
+          <div className="transactionList">{transactions.map((item) => <div className="transaction" key={item.name}><div className={`transactionIcon ${item.tone}`}>◇</div><div><strong>{item.name}</strong><p>{item.category} • {item.date}</p></div><b className={item.tone}>{item.value}</b><button aria-label={`Opções de ${item.name}`}>⋮</button></div>)}</div>
+        </article>
+
+        <section className="importStrip" id="imports"><div><span>↑</span><div><strong>Importe seu extrato ou uma nota fiscal</strong><p>OFX, CSV, PDF ou imagem. A IA extrai e organiza para você revisar.</p></div></div><button>Selecionar arquivo</button></section>
+      </section>
+    </main>
   );
 }
