@@ -1,17 +1,10 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-type Transaction = { id: string; name: string; category: string; date: string; amount: number };
-
-const initialTransactions: Transaction[] = [
-  { id: "1", name: "Supermercado Pão de Açúcar", category: "Alimentação", date: "Hoje, 10:42", amount: -187.4 },
-  { id: "2", name: "Salário", category: "Receita", date: "29 ago, 08:15", amount: 8750 },
-  { id: "3", name: "Uber", category: "Transporte", date: "28 ago, 19:30", amount: -32.9 },
-  { id: "4", name: "Conta de energia", category: "Moradia", date: "27 ago, 13:06", amount: -214.18 },
-];
+type Transaction = { id: string; name: string; category: string; date: string; occurredOn: string; amount: number };
 
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -27,13 +20,31 @@ function Icon({ children }: { children: React.ReactNode }) {
 
 export default function Home() {
   const router = useRouter();
-  const [transactions, setTransactions] = useState(initialTransactions);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [review, setReview] = useState<Transaction[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [importing, setImporting] = useState(false);
   const [userId, setUserId] = useState<string>();
   const [userEmail, setUserEmail] = useState("carregando...");
   const fileInput = useRef<HTMLInputElement>(null);
+  const today = new Date();
+  const monthKey = today.toISOString().slice(0, 7);
+  const monthLabel = today.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  const dateLabel = today.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" }).toUpperCase();
+  const currentMonth = useMemo(() => transactions.filter((item) => item.occurredOn.startsWith(monthKey)), [transactions, monthKey]);
+  const income = currentMonth.reduce((total, item) => total + Math.max(item.amount, 0), 0);
+  const expenses = currentMonth.reduce((total, item) => total + Math.abs(Math.min(item.amount, 0)), 0);
+  const balance = transactions.reduce((total, item) => total + item.amount, 0);
+  const categories = useMemo(() => {
+    const totals = new Map<string, number>();
+    currentMonth.filter((item) => item.amount < 0).forEach((item) => totals.set(item.category, (totals.get(item.category) ?? 0) + Math.abs(item.amount)));
+    return [...totals.entries()].map(([name, value]) => ({ name, value, percent: expenses ? Math.round(value / expenses * 100) : 0 })).sort((a, b) => b.value - a.value);
+  }, [currentMonth, expenses]);
+  const chartColors = ["#245f47", "#65a980", "#9bc5a9", "#d1b47a", "#d8ded9"];
+  const donutBackground = categories.length ? `conic-gradient(${categories.slice(0, 5).map((item, index) => {
+    const start = categories.slice(0, index).reduce((sum, category) => sum + category.percent, 0);
+    return `${chartColors[index]} ${start}% ${start + item.percent}%`;
+  }).join(",")})` : "#e8edea";
 
   useEffect(() => {
     const supabase = createClient();
@@ -51,6 +62,7 @@ export default function Home() {
         category: String((row.raw_data as { category?: string } | null)?.category ?? "Outros"),
         date: new Date(`${row.occurred_on}T12:00:00`).toLocaleDateString("pt-BR"),
         amount: Number(row.amount),
+        occurredOn: row.occurred_on,
         status: row.status,
       }));
       setTransactions(mapped.filter((row) => row.status === "confirmed"));
@@ -74,7 +86,7 @@ export default function Home() {
     };
     const { data: saved, error } = await createClient().from("transactions").insert(candidate).select("id").single();
     if (error) return window.alert(`Não foi possível salvar: ${error.message}`);
-    setTransactions((current) => [{ id: saved.id, name: candidate.description, category: String(data.get("category")), date: "Agora", amount: candidate.amount }, ...current]);
+    setTransactions((current) => [{ id: saved.id, name: candidate.description, category: String(data.get("category")), date: "Agora", occurredOn: candidate.occurred_on, amount: candidate.amount }, ...current]);
     setShowForm(false);
   }
 
@@ -96,7 +108,7 @@ export default function Home() {
       setImporting(false);
       if (!response.ok) return window.alert(result.error || "Falha ao analisar o documento.");
       const extracted = result.transaction;
-      setReview((current) => [{ id: extracted.id, name: extracted.description, category: extracted.category, date: extracted.occurred_on || "Importado", amount: Number(extracted.amount) }, ...current]);
+      setReview((current) => [{ id: extracted.id, name: extracted.description, category: extracted.category, date: extracted.occurred_on || "Importado", occurredOn: extracted.occurred_on || new Date().toISOString().slice(0, 10), amount: Number(extracted.amount) }, ...current]);
       return;
     }
 
@@ -109,7 +121,7 @@ export default function Home() {
       const amount = parseAmount(parts[amountIndex]);
       if (!amount) return [];
       const description = parts.find((part, partIndex) => partIndex !== amountIndex && /[a-zà-ú]/i.test(part)) || `Lançamento ${index + 1}`;
-      return [{ id: crypto.randomUUID(), name: description, category: "A classificar", date: "Importado", amount }];
+      return [{ id: crypto.randomUUID(), name: description, category: "A classificar", date: "Importado", occurredOn: new Date().toISOString().slice(0, 10), amount }];
     });
     setReview(candidates);
   }
@@ -154,7 +166,7 @@ export default function Home() {
           <a href="#"><Icon>▤</Icon>Relatórios</a>
         </nav>
         <div className="sideBottom">
-          <div className="whatsapp"><span>●</span><div><strong>WhatsApp conectado</strong><small>Pronto para receber</small></div></div>
+          <div className="whatsapp pending"><span>●</span><div><strong>WhatsApp não configurado</strong><small>Integração pendente</small></div></div>
           <a href="#"><Icon>⚙</Icon>Configurações</a>
           <button className="profile profileButton" onClick={signOut}><div className="avatar">FC</div><div><strong>Minha conta</strong><small>{userEmail}</small></div><span>Sair</span></button>
         </div>
@@ -162,40 +174,36 @@ export default function Home() {
 
       <section className="content">
         <header>
-          <div><p className="eyebrow">DOMINGO, 30 DE AGOSTO</p><h1>Boa tarde, Marcos</h1><p>Aqui está o resumo das suas finanças.</p></div>
+          <div><p className="eyebrow">{dateLabel}</p><h1>Suas finanças</h1><p>Resumo calculado somente com seus lançamentos confirmados.</p></div>
           <button className="primary" onClick={() => setShowForm(true)}>+ Nova transação</button>
         </header>
 
         <div className="summaryGrid">
-          <article className="balanceCard"><div><span>Saldo total</span><small>• Atualizado agora</small></div><strong>R$ 12.486,32</strong><p><em>↑ 8,4%</em> em relação ao mês passado</p><div className="spark"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></div></article>
-          <article className="metric"><span>Receitas no mês</span><strong>R$ 10.250,00</strong><p className="positive">↑ R$ 750,00 este mês</p></article>
-          <article className="metric"><span>Despesas no mês</span><strong>R$ 5.763,68</strong><p className="negative">↑ 12% acima da média</p></article>
+          <article className="balanceCard"><div><span>Saldo dos lançamentos</span><small>• Dados reais</small></div><strong>{money.format(balance)}</strong><p>{transactions.length} {transactions.length === 1 ? "lançamento confirmado" : "lançamentos confirmados"}</p></article>
+          <article className="metric"><span>Receitas no mês</span><strong>{money.format(income)}</strong><p className="positive">{currentMonth.filter((item) => item.amount > 0).length} entradas</p></article>
+          <article className="metric"><span>Despesas no mês</span><strong>{money.format(expenses)}</strong><p className="negative">{currentMonth.filter((item) => item.amount < 0).length} saídas</p></article>
         </div>
 
         <div className="mainGrid">
           <article className="card spending">
-            <div className="cardTitle"><div><h2>Despesas por categoria</h2><p>Agosto de 2026</p></div><button>Este mês ⌄</button></div>
-            <div className="donutWrap"><div className="donut"><div><small>Total</small><strong>R$ 5.763</strong></div></div>
+            <div className="cardTitle"><div><h2>Despesas por categoria</h2><p className="capitalize">{monthLabel}</p></div><button>Este mês</button></div>
+            <div className="donutWrap"><div className="donut" style={{ background: donutBackground }}><div><small>Total</small><strong>{money.format(expenses)}</strong></div></div>
               <div className="legend">
-                <p><i className="c1"/><span>Moradia</span><b>R$ 2.140</b><small>37%</small></p>
-                <p><i className="c2"/><span>Alimentação</span><b>R$ 1.326</b><small>23%</small></p>
-                <p><i className="c3"/><span>Transporte</span><b>R$ 864</b><small>15%</small></p>
-                <p><i className="c4"/><span>Lazer</span><b>R$ 634</b><small>11%</small></p>
-                <p><i className="c5"/><span>Outros</span><b>R$ 799</b><small>14%</small></p>
+                {categories.length === 0 ? <p className="emptyInline">Nenhuma despesa confirmada neste mês.</p> : categories.slice(0, 5).map((item, index) => <p key={item.name}><i style={{background: chartColors[index]}}/><span>{item.name}</span><b>{money.format(item.value)}</b><small>{item.percent}%</small></p>)}
               </div>
             </div>
           </article>
 
           <article className="card assistantCard">
             <div className="aiHead"><span>✦</span><div><h2>Assistente financeiro</h2><p>Análise inteligente</p></div></div>
-            <div className="insight"><span>💡</span><div><strong>Você gastou 18% a mais com alimentação</strong><p>Se mantiver o ritmo, fechará o mês R$ 240 acima da sua média.</p><a href="#">Ver detalhes →</a></div></div>
-            <div className="quickAsk"><span>✦</span><input aria-label="Pergunte ao assistente" placeholder="Pergunte sobre suas finanças..."/><button>↑</button></div>
+            <div className="insight"><span>💡</span><div><strong>{transactions.length ? "Seus dados estão prontos para análise" : "Adicione transações para receber análises"}</strong><p>{transactions.length ? "Os próximos insights serão gerados apenas a partir dos seus dados reais." : "Nenhuma recomendação foi gerada porque ainda não há histórico confirmado."}</p></div></div>
+            <div className="quickAsk disabled"><span>✦</span><input disabled aria-label="Pergunte ao assistente" placeholder="Assistente em breve"/><button disabled>↑</button></div>
           </article>
         </div>
 
         <article className="card transactions" id="transactions">
           <div className="cardTitle"><div><h2>Transações recentes</h2><p>Seus últimos lançamentos</p></div><a href="#">Ver todas →</a></div>
-          <div className="transactionList">{transactions.map((item) => <div className="transaction" key={item.id}><div className={`transactionIcon ${item.amount >= 0 ? "green" : "red"}`}>◇</div><div><strong>{item.name}</strong><p>{item.category} • {item.date}</p></div><b className={item.amount >= 0 ? "green" : "red"}>{item.amount >= 0 ? "+ " : "- "}{money.format(Math.abs(item.amount))}</b><button aria-label={`Opções de ${item.name}`}>⋮</button></div>)}</div>
+          <div className="transactionList">{transactions.length === 0 ? <div className="emptyState"><strong>Nenhuma transação confirmada</strong><p>Adicione uma transação ou importe um extrato para começar.</p></div> : transactions.map((item) => <div className="transaction" key={item.id}><div className={`transactionIcon ${item.amount >= 0 ? "green" : "red"}`}>◇</div><div><strong>{item.name}</strong><p>{item.category} • {item.date}</p></div><b className={item.amount >= 0 ? "green" : "red"}>{item.amount >= 0 ? "+ " : "- "}{money.format(Math.abs(item.amount))}</b><button aria-label={`Opções de ${item.name}`}>⋮</button></div>)}</div>
         </article>
 
         {review.length > 0 && <article className="card reviewCard" id="review"><div className="cardTitle"><div><h2>Revisar importação</h2><p>Confirme os lançamentos antes de afetarem o saldo</p></div><button onClick={() => setReview([])}>Fechar fila</button></div>{review.map((item) => <div className="reviewRow" key={item.id}><div><strong>{item.name}</strong><p>{item.category} • {money.format(item.amount)}</p></div><button onClick={() => ignoreReview(item)}>Ignorar</button><button className="approve" onClick={() => approve(item)}>Aprovar</button></div>)}</article>}
