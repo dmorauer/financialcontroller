@@ -74,8 +74,12 @@ export async function POST(request: Request) {
   const text = messageText(payload);
   const isGroup = remoteJid.endsWith("@g.us");
   const command = text && isGroup ? parseGroupCommand(text) : null;
+  console.info("[evolution] message received", { instance, messageId, isGroup, fromMe: Boolean(payload.data?.key?.fromMe), hasText: Boolean(text), hasCommand: Boolean(command) });
   if (payload.data?.key?.fromMe && !isGroup) return NextResponse.json({ received: true, ignored: true });
-  if (isGroup && !command) return NextResponse.json({ received: true, ignored: true, reason: "group_message_without_command" });
+  if (isGroup && !command) {
+    console.info("[evolution] ignored", { messageId, reason: "group_message_without_command" });
+    return NextResponse.json({ received: true, ignored: true, reason: "group_message_without_command" });
+  }
 
   const admin = createAdminClient();
   const { data: connection } = await admin
@@ -100,6 +104,7 @@ export async function POST(request: Request) {
       .eq("active", true)
       .maybeSingle();
     if (!allowed) {
+      console.info("[evolution] ignored", { messageId, reason: "sender_not_allowed" });
       await sendEvolutionText(instance, remoteJid, "🔒 Este número não está autorizado a lançar despesas neste grupo.").catch(() => false);
       return NextResponse.json({ received: true, ignored: true, reason: "sender_not_allowed" });
     }
@@ -144,6 +149,7 @@ export async function POST(request: Request) {
     },
   });
   if (transactionError) return NextResponse.json({ error: "Falha ao criar transação." }, { status: 500 });
+  console.info("[evolution] transaction created", { messageId, isGroup, category: parsed.category });
 
   if (isGroup) {
     const sender = payload.data?.pushName ? `${payload.data.pushName}: ` : "";

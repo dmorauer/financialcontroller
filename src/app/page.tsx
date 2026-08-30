@@ -97,6 +97,18 @@ export default function Home() {
     });
   }, [router]);
 
+  async function refreshReview() {
+    const { data: rows, error } = await createClient().from("transactions").select("id, description, amount, occurred_on, raw_data, account_id").eq("status", "review").order("created_at", { ascending: false }).limit(100);
+    if (error) return;
+    setReview((rows ?? []).map((row) => ({ id: row.id, name: row.description, category: String((row.raw_data as { category?: string } | null)?.category ?? "Outros"), date: new Date(`${row.occurred_on}T12:00:00`).toLocaleDateString("pt-BR"), occurredOn: row.occurred_on, amount: Number(row.amount), accountId: row.account_id })));
+  }
+
+  useEffect(() => {
+    if (!userId) return;
+    const timer = window.setInterval(() => void refreshReview(), 8000);
+    return () => window.clearInterval(timer);
+  }, [userId]);
+
   async function addTransaction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!userId) return;
@@ -269,7 +281,7 @@ export default function Home() {
           <a className="active" href="#"><Icon>▦</Icon>Visão geral</a>
           <a href="#transactions"><Icon>⇅</Icon>Transações</a>
           <a href="#imports"><Icon>↑</Icon>Importar</a>
-          <a href="#review"><Icon>✓</Icon>Revisão {review.length > 0 && <b>{review.length}</b>}</a>
+          <a href="#review" onClick={() => void refreshReview()}><Icon>✓</Icon>Revisão {review.length > 0 && <b>{review.length}</b>}</a>
           <a href="#budgets"><Icon>◎</Icon>Orçamentos</a>
           <a href="#"><Icon>▤</Icon>Relatórios</a>
         </nav>
@@ -324,7 +336,7 @@ export default function Home() {
           <div className="transactionList">{transactions.length === 0 ? <div className="emptyState"><strong>Nenhuma transação confirmada</strong><p>Adicione uma transação ou importe um extrato para começar.</p></div> : transactions.map((item) => <div className="transaction" key={item.id}><div className={`transactionIcon ${item.amount >= 0 ? "green" : "red"}`}>◇</div><div><strong>{item.name}</strong><p>{item.category} • {item.date}{item.accountId ? ` • ${accounts.find((account) => account.id === item.accountId)?.name || "Conta"}` : ""}</p></div><b className={item.amount >= 0 ? "green" : "red"}>{item.amount >= 0 ? "+ " : "- "}{money.format(Math.abs(item.amount))}</b><button aria-label={`Editar ${item.name}`} onClick={() => { setEditingTransaction(item); setShowForm(true); }}>⋮</button></div>)}</div>
         </article>
 
-        {review.length > 0 && <article className="card reviewCard" id="review"><div className="cardTitle"><div><h2>Revisar importação</h2><p>Confirme os lançamentos antes de afetarem o saldo</p></div><button onClick={() => setReview([])}>Fechar fila</button></div>{review.map((item) => <div className="reviewRow" key={item.id}><div><strong>{item.name}</strong><p>{item.category} • {money.format(item.amount)}</p></div><button onClick={() => ignoreReview(item)}>Ignorar</button><button className="approve" onClick={() => approve(item)}>Aprovar</button></div>)}</article>}
+        <article className="card reviewCard" id="review"><div className="cardTitle"><div><h2>Revisão de lançamentos</h2><p>Confirme os itens recebidos pelo WhatsApp ou por importação</p></div><button onClick={() => void refreshReview()}>Atualizar fila</button></div>{review.length === 0 ? <div className="emptyState"><strong>Nenhum lançamento aguardando revisão</strong><p>Novos comandos do WhatsApp aparecerão aqui automaticamente.</p></div> : review.map((item) => <div className="reviewRow" key={item.id}><div><strong>{item.name}</strong><p>{item.category} • {money.format(item.amount)}</p></div><button onClick={() => ignoreReview(item)}>Ignorar</button><button className="approve" onClick={() => approve(item)}>Aprovar</button></div>)}</article>
 
         <section className="importStrip" id="imports"><div><span>↑</span><div><strong>Importe extratos, notas e comprovantes</strong><p>CSV, PDF, JPG, PNG ou WEBP. Documentos ficam privados e passam por revisão.</p></div></div><input ref={fileInput} type="file" accept=".csv,.txt,.pdf,.jpg,.jpeg,.png,.webp" hidden onChange={(event) => importStatement(event.target.files?.[0])}/><button disabled={importing} onClick={() => fileInput.current?.click()}>{importing ? "Analisando..." : "Selecionar arquivo"}</button></section>
       </section>
