@@ -1,4 +1,6 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const safeEqual = (left: string, right: string) => {
   const leftBuffer = Buffer.from(left);
@@ -7,7 +9,19 @@ const safeEqual = (left: string, right: string) => {
 };
 
 export function gatewayToken() {
+  const file = process.env.SALDO_AI_API_KEY_FILE || resolve(process.cwd(), ".saldo-ai-gateway.key");
+  if (existsSync(/*turbopackIgnore: true*/ file)) {
+    const stored = readFileSync(/*turbopackIgnore: true*/ file, "utf8").trim();
+    if (stored) return stored;
+  }
   return process.env.SALDO_AI_API_KEY;
+}
+
+export function rotateGatewayToken() {
+  const token = randomBytes(32).toString("hex");
+  const file = process.env.SALDO_AI_API_KEY_FILE || resolve(process.cwd(), ".saldo-ai-gateway.key");
+  writeFileSync(file, token + "\n", { encoding: "utf8", mode: 0o600 });
+  return token;
 }
 
 export function signGatewayPayload(token: string, timestamp: string, rawBody: string) {
