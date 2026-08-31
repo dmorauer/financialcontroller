@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:poker": "node --experimental-strip-types --test src/lib/poker-gateway/*.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",
