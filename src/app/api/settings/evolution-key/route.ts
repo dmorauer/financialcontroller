@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { randomBytes } from "node:crypto";
 
 export async function POST(request: Request) {
   const token = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
@@ -12,9 +13,9 @@ export async function POST(request: Request) {
 
   const apiUrl = process.env.EVOLUTION_API_URL;
   const apiKey = process.env.EVOLUTION_API_KEY;
-  const webhookSecret = process.env.EVOLUTION_WEBHOOK_SECRET;
+  const webhookSecret = process.env.EVOLUTION_WEBHOOK_SECRET || randomBytes(32).toString("hex");
   const webhookEndpoint = process.env.POKER_SUPABASE_WEBHOOK_URL || "https://znutkwcppixmtjhyhgen.supabase.co/functions/v1/evolution-webhook";
-  if (!apiUrl || !apiKey || !webhookSecret) {
+  if (!apiUrl || !apiKey) {
     return Response.json({ error: "A configuração da Evolution ainda não está completa neste servidor." }, { status: 503 });
   }
 
