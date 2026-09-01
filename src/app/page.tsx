@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { parseDelimitedStatement, parseOfxStatement } from "@/lib/finance/statement-parser";
 
-type Transaction = { id: string; name: string; category: string; date: string; occurredOn: string; dueOn?: string | null; amount: number; accountId?: string | null };
+type Transaction = { id: string; name: string; category: string; date: string; occurredOn: string; dueOn?: string | null; paidAt?: string | null; amount: number; accountId?: string | null };
 type Account = { id: string; name: string; kind: string; institution: string | null; openingBalance: number; creditLimit?: number | null; statementCloseDay?: number | null; paymentDueDay?: number | null };
 type Budget = { id: string; category: string; month: string; amount: number };
 type AllowedSender = { id: string; name: string; phone: string; active: boolean };
@@ -75,7 +75,7 @@ export default function Home() {
       setUserEmail(data.user.email ?? "Minha conta");
       const currentMonth = `${new Date().toISOString().slice(0, 7)}-01`;
       const [{ data: rows }, { data: accountRows }, { data: budgetRows }, { data: senderRows }] = await Promise.all([
-        supabase.from("transactions").select("id, description, amount, occurred_on, due_on, raw_data, status, account_id").neq("status", "ignored").order("occurred_on", { ascending: false }).limit(100),
+        supabase.from("transactions").select("id, description, amount, occurred_on, due_on, paid_at, raw_data, status, account_id").neq("status", "ignored").order("occurred_on", { ascending: false }).limit(100),
         supabase.from("accounts").select("id, name, kind, institution, opening_balance, credit_limit, statement_close_day, payment_due_day").order("created_at"),
         supabase.from("budgets").select("id, category, month, amount").eq("month", currentMonth).order("category"),
         supabase.from("whatsapp_allowed_senders").select("id, name, phone, active").order("name"),
@@ -92,6 +92,7 @@ export default function Home() {
         accountId: row.account_id,
         occurredOn: row.occurred_on,
         dueOn: row.due_on,
+        paidAt: row.paid_at,
         status: row.status,
       }));
       setTransactions(mapped.filter((row) => row.status === "confirmed"));
@@ -132,7 +133,7 @@ export default function Home() {
       : createClient().from("transactions").insert(candidate);
     const { data: saved, error } = await query.select("id").single();
     if (error) return window.alert(`Não foi possível salvar: ${error.message}`);
-    const updated = { id: saved.id, name: candidate.description, category: String(data.get("category")), date: new Date(`${candidate.occurred_on}T12:00:00`).toLocaleDateString("pt-BR"), occurredOn: candidate.occurred_on, dueOn: candidate.due_on, amount: candidate.amount, accountId: candidate.account_id ? String(candidate.account_id) : null };
+    const updated = { id: saved.id, name: candidate.description, category: String(data.get("category")), date: new Date(`${candidate.occurred_on}T12:00:00`).toLocaleDateString("pt-BR"), occurredOn: candidate.occurred_on, dueOn: candidate.due_on, paidAt: editingTransaction?.paidAt ?? null, amount: candidate.amount, accountId: candidate.account_id ? String(candidate.account_id) : null };
     setTransactions((current) => [updated, ...current.filter((item) => item.id !== saved.id)]);
     setEditingTransaction(null);
     setShowForm(false);
@@ -212,6 +213,13 @@ export default function Home() {
     setTransactions((current) => current.filter((item) => item.id !== editingTransaction.id));
     setEditingTransaction(null);
     setShowForm(false);
+  }
+
+  async function toggleTransactionPaid(item: Transaction) {
+    const paidAt = item.paidAt ? null : new Date().toISOString();
+    const { error } = await createClient().from("transactions").update({ paid_at: paidAt }).eq("id", item.id);
+    if (error) return window.alert(`Não foi possível atualizar o pagamento: ${error.message}`);
+    setTransactions((current) => current.map((transaction) => transaction.id === item.id ? { ...transaction, paidAt } : transaction));
   }
 
   async function importStatement(file?: File) {
@@ -330,7 +338,7 @@ export default function Home() {
 
         <article className="card transactions" id="transactions">
           <div className="cardTitle"><div><h2>Transações recentes</h2><p>Seus últimos lançamentos</p></div><a href="#">Ver todas →</a></div>
-          <div className="transactionList">{transactions.length === 0 ? <div className="emptyState"><strong>Nenhuma transação confirmada</strong><p>Adicione uma transação ou importe um extrato para começar.</p></div> : transactions.map((item) => <div className="transaction" key={item.id}><div className={`transactionIcon ${item.amount >= 0 ? "green" : "red"}`}>◇</div><div><strong>{item.name}</strong><p>{item.category} • {item.dueOn ? `Vence ${new Date(`${item.dueOn}T12:00:00`).toLocaleDateString("pt-BR")}` : item.date}{item.accountId ? ` • ${accounts.find((account) => account.id === item.accountId)?.name || "Conta"}` : ""}</p></div><b className={item.amount >= 0 ? "green" : "red"}>{item.amount >= 0 ? "+ " : "- "}{money.format(Math.abs(item.amount))}</b><button aria-label={`Editar ${item.name}`} onClick={() => { setEditingTransaction(item); setShowForm(true); }}>⋮</button></div>)}</div>
+          <div className="transactionList">{transactions.length === 0 ? <div className="emptyState"><strong>Nenhuma transação confirmada</strong><p>Adicione uma transação ou importe um extrato para começar.</p></div> : transactions.map((item) => <div className={`transaction ${item.paidAt ? "paid" : ""}`} key={item.id}><div className={`transactionIcon ${item.paidAt ? "paidIcon" : item.amount >= 0 ? "green" : "red"}`}>{item.paidAt ? "✓" : "◇"}</div><div><div className="transactionName"><strong>{item.name}</strong>{item.paidAt && <span>Paga</span>}</div><p>{item.category} • {item.dueOn ? `Vence ${new Date(`${item.dueOn}T12:00:00`).toLocaleDateString("pt-BR")}` : item.date}{item.accountId ? ` • ${accounts.find((account) => account.id === item.accountId)?.name || "Conta"}` : ""}</p></div><b className={item.amount >= 0 ? "green" : "red"}>{item.amount >= 0 ? "+ " : "- "}{money.format(Math.abs(item.amount))}</b><div className="transactionActions"><button className="paidButton" aria-label={item.paidAt ? `Marcar ${item.name} como pendente` : `Marcar ${item.name} como paga`} title={item.paidAt ? "Reabrir conta" : "Marcar como paga"} onClick={() => void toggleTransactionPaid(item)}>{item.paidAt ? "↶" : "✓"}</button><button aria-label={`Editar ${item.name}`} onClick={() => { setEditingTransaction(item); setShowForm(true); }}>⋮</button></div></div>)}</div>
         </article>
 
         <article className="card reviewCard" id="review"><div className="cardTitle"><div><h2>Revisão de lançamentos</h2><p>Confirme os itens recebidos pelo WhatsApp ou por importação</p></div><button onClick={() => void refreshReview()}>Atualizar fila</button></div>{review.length === 0 ? <div className="emptyState"><strong>Nenhum lançamento aguardando revisão</strong><p>Novos comandos do WhatsApp aparecerão aqui automaticamente.</p></div> : review.map((item) => <div className="reviewRow" key={item.id}><div><strong>{item.name}</strong><p>{item.category} • {money.format(item.amount)}</p></div><button onClick={() => ignoreReview(item)}>Ignorar</button><button className="approve" onClick={() => approve(item)}>Aprovar</button></div>)}</article>
